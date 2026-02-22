@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { mockStations } from '../data/mockData'
-import { Plus, Edit2, Toggle2Left, X, Save, MapPin } from 'lucide-react'
+import { Plus, Edit2, X, Save, MapPin } from 'lucide-react'
 
 const typeColors = { Police: 'bg-blue-100 text-blue-700', Hospital: 'bg-red-100 text-red-700', Fire: 'bg-orange-100 text-orange-700' }
 const EMPTY = { name: '', type: 'Police', phone: '', location: '', rating: 4.0, status: 'Open' }

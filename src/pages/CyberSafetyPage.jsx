@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { mockScamReports, mockCyberRisk, mockScamKeywords } from '../data/mockData'
 import { PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis, ResponsiveContainer, CartesianGrid } from 'recharts'
-import { AlertTriangle, ShieldCheck, Download } from 'lucide-react'
+import { TriangleAlert, ShieldCheck, Download } from 'lucide-react'
 
 const riskColors = {
     'HIGH RISK': { badge: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
@@ -58,7 +58,7 @@ export default function CyberSafetyPage() {
                     <h2 className="font-semibold text-gray-800">Scam Reports</h2>
                     <div className="flex items-center gap-2">
                         <span className="flex items-center gap-1 text-red-600 text-xs font-medium bg-red-50 px-2 py-1 rounded-lg">
-                            <AlertTriangle size={12} />
+                            <TriangleAlert size={12} />
                             {reports.filter(r => r.riskLevel === 'HIGH RISK').length} High Risk
                         </span>
                         <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-600 border border-purple-200 rounded-lg hover:bg-purple-50 transition">

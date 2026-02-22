@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { Shield, Eye, EyeOff, AlertCircle } from 'lucide-react'
+import { Shield, Eye, EyeOff, CircleAlert } from 'lucide-react'
 
 export default function LoginPage() {
     const { login } = useAuth()
@@ -114,7 +114,7 @@ export default function LoginPage() {
 
                         {error && (
                             <div className="flex items-center gap-2 text-red-600 bg-red-50 border border-red-200 px-3 py-2.5 rounded-xl text-sm">
-                                <AlertCircle size={16} />
+                                <CircleAlert size={16} />
                                 {error}
                             </div>
                         )}
