@@ -1,35 +1,57 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider, useAuth } from './context/AuthContext'
+import DashboardLayout from './components/layout/DashboardLayout'
+import LoginPage from './pages/LoginPage'
+import OverviewPage from './pages/OverviewPage'
+import UsersPage from './pages/UsersPage'
+import EmergencyCallsPage from './pages/EmergencyCallsPage'
+import PhysicalSafetyPage from './pages/PhysicalSafetyPage'
+import CyberSafetyPage from './pages/CyberSafetyPage'
+import HealthPage from './pages/HealthPage'
+import NearbyServicesPage from './pages/NearbyServicesPage'
+import NewsPage from './pages/NewsPage'
+import AnalyticsPage from './pages/AnalyticsPage'
+import SettingsPage from './pages/SettingsPage'
 
-function App() {
-  const [count, setCount] = useState(0)
+function ProtectedRoute({ children }) {
+  const { user, loading } = useAuth()
+  if (loading) return <div className="flex items-center justify-center h-screen text-purple-600">Loading…</div>
+  if (!user) return <Navigate to="/login" replace />
+  return children
+}
 
+function AppRoutes() {
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/" element={
+        <ProtectedRoute>
+          <DashboardLayout />
+        </ProtectedRoute>
+      }>
+        <Route index element={<Navigate to="/overview" replace />} />
+        <Route path="overview" element={<OverviewPage />} />
+        <Route path="users" element={<UsersPage />} />
+        <Route path="emergency-calls" element={<EmergencyCallsPage />} />
+        <Route path="physical-safety" element={<PhysicalSafetyPage />} />
+        <Route path="cyber-safety" element={<CyberSafetyPage />} />
+        <Route path="health" element={<HealthPage />} />
+        <Route path="nearby-services" element={<NearbyServicesPage />} />
+        <Route path="news" element={<NewsPage />} />
+        <Route path="analytics" element={<AnalyticsPage />} />
+        <Route path="settings" element={<SettingsPage />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/overview" replace />} />
+    </Routes>
   )
 }
 
-export default App
+export default function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <AppRoutes />
+      </BrowserRouter>
+    </AuthProvider>
+  )
+}
