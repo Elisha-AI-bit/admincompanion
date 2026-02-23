@@ -30,9 +30,11 @@ export default function OverviewPage() {
         threatsBlocked: 0,
         callsTrend: [],
         cyberRisk: [],
-        symptoms: []
+        symptoms: [],
+        recentEvents: []
     })
     const [error, setError] = useState(null)
+    const [loading, setLoading] = useState(true)
 
     useEffect(() => {
         const fetchOverviewData = async () => {
@@ -62,6 +64,27 @@ export default function OverviewPage() {
                 const cyberRisk = riskRes.status === 'fulfilled' ? riskRes.value : []
                 const symptoms = symptomsRes.status === 'fulfilled' ? symptomsRes.value : []
 
+                const combinedEvents = [
+                    ...emergencyCalls.map(c => ({
+                        id: c.id,
+                        type: 'EMERGENCY',
+                        category: c.type,
+                        timestamp: c.timestamp,
+                        icon: '🚨',
+                        color: 'bg-red-50 text-red-600',
+                        message: `${c.type} call reported by User ${c.userId?.substring(0, 4)}...`
+                    })),
+                    ...scamReports.map(r => ({
+                        id: r.id,
+                        type: 'CYBER',
+                        category: r.riskLevel,
+                        timestamp: r.timestamp,
+                        icon: '🛡️',
+                        color: r.riskLevel === 'HIGH RISK' ? 'bg-orange-50 text-orange-600' : 'bg-blue-50 text-blue-600',
+                        message: r.message
+                    }))
+                ].sort((a, b) => dateUtils.compare(a.timestamp, b.timestamp)).slice(0, 10)
+
                 setData({
                     usersCount: users.length,
                     activeToday: users.filter(u => dateUtils.toISODate(u.lastActive) === new Date().toISOString().split('T')[0]).length,
@@ -72,7 +95,8 @@ export default function OverviewPage() {
                     threatsBlocked: 0,
                     callsTrend,
                     cyberRisk,
-                    symptoms
+                    symptoms,
+                    recentEvents: combinedEvents
                 })
                 setLoading(false)
             } catch (error) {
@@ -191,6 +215,40 @@ export default function OverviewPage() {
                         </defs>
                     </BarChart>
                 </ResponsiveContainer>
+            </div>
+
+            {/* Activity Log */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                    <h2 className="font-semibold text-gray-800 flex items-center gap-2">
+                        <Activity size={18} className="text-purple-600" />
+                        Security Activity Log
+                    </h2>
+                    <span className="text-xs text-gray-400">Live Feed</span>
+                </div>
+                <div className="divide-y divide-gray-50">
+                    {data.recentEvents.length === 0 ? (
+                        <div className="px-6 py-10 text-center text-sm text-gray-400">No recent security activity logged.</div>
+                    ) : (
+                        data.recentEvents.map(event => (
+                            <div key={event.id} className="px-6 py-4 flex items-center gap-4 hover:bg-gray-50 transition-colors">
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0 ${event.color}`}>
+                                    {event.icon}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{event.type} · {event.category}</p>
+                                        <p className="text-[10px] text-gray-400">{dateUtils.format(event.timestamp)}</p>
+                                    </div>
+                                    <p className="text-sm text-gray-700 mt-0.5 truncate">{event.message}</p>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+                <div className="px-6 py-3 bg-gray-50 border-t border-gray-100 text-center text-xs font-semibold text-purple-600 hover:text-purple-700 cursor-pointer">
+                    View Full Security Audit Trail
+                </div>
             </div>
         </div>
     )
