@@ -1,42 +1,66 @@
 import { createContext, useContext, useState, useEffect } from 'react'
+import {
+    onAuthStateChanged,
+    signInWithEmailAndPassword,
+    signOut
+} from 'firebase/auth'
+import { doc, getDoc } from 'firebase/firestore'
+import { auth, db } from '../firebase/config'
 
 const AuthContext = createContext(null)
-
-// Demo admin user — replace with real Firebase Auth
-const DEMO_USER = {
-    uid: 'u1',
-    name: 'Amara Nkosi',
-    email: 'admin@mycompanion.app',
-    role: 'super_admin',
-    avatar: null,
-}
 
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null)
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
-        // Check localStorage for demo session
-        const stored = localStorage.getItem('mc_admin_user')
-        if (stored) {
-            try { setUser(JSON.parse(stored)) } catch { /* ignore */ }
-        }
-        setLoading(false)
+        const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+            if (firebaseUser) {
+                // Fetch user role from Firestore
+                const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid))
+                if (userDoc.exists()) {
+                    setUser({
+                        uid: firebaseUser.uid,
+                        email: firebaseUser.email,
+                        ...userDoc.data()
+                    })
+                } else {
+                    // Default role for authenticated users without a doc
+                    setUser({
+                        uid: firebaseUser.uid,
+                        email: firebaseUser.email,
+                        role: 'user'
+                    })
+                }
+            } else {
+                setUser(null)
+            }
+            setLoading(false)
+        })
+
+        return () => unsubscribe()
     }, [])
 
-    const login = (email, password) => {
-        // Demo login — replace with Firebase signInWithEmailAndPassword
-        if (email === 'admin@mycompanion.app' && password === 'admin123') {
-            setUser(DEMO_USER)
-            localStorage.setItem('mc_admin_user', JSON.stringify(DEMO_USER))
+    const login = async (email, password) => {
+        try {
+            await signInWithEmailAndPassword(auth, email, password)
             return { success: true }
+        } catch (error) {
+            console.error('Login error:', error)
+            let message = 'An error occurred during login.'
+            if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+                message = 'Invalid email or password.'
+            }
+            return { success: false, error: message }
         }
-        return { success: false, error: 'Invalid email or password.' }
     }
 
-    const logout = () => {
-        setUser(null)
-        localStorage.removeItem('mc_admin_user')
+    const logout = async () => {
+        try {
+            await signOut(auth)
+        } catch (error) {
+            console.error('Logout error:', error)
+        }
     }
 
     const hasRole = (...roles) => user && roles.includes(user.role)

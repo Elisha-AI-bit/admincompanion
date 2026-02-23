@@ -1,6 +1,7 @@
-import { useState } from 'react'
-import { mockEmergencyCalls } from '../data/mockData'
-import { Phone, Filter, Download } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { firestoreService } from '../firebase/firestoreService'
+import { Phone, Filter, Download, Loader2 } from 'lucide-react'
+import { dateUtils } from '../utils/dateUtils'
 
 const typeColors = {
     Police: 'bg-blue-100 text-blue-700',
@@ -13,12 +14,23 @@ const typeColors = {
 const typeIcons = { Police: '🚔', Ambulance: '🚑', Fire: '🚒', GBV: '💜', Cyber: '🛡️' }
 
 export default function EmergencyCallsPage() {
+    const [calls, setCalls] = useState([])
+    const [loading, setLoading] = useState(true)
     const [filter, setFilter] = useState('all')
-    const filtered = filter === 'all' ? mockEmergencyCalls : mockEmergencyCalls.filter(c => c.type === filter)
+
+    useEffect(() => {
+        const unsubscribe = firestoreService.subscribe('emergencyCalls', (data) => {
+            setCalls(data.sort((a, b) => dateUtils.compare(a.timestamp, b.timestamp)))
+            setLoading(false)
+        })
+        return () => unsubscribe()
+    }, [])
+
+    const filtered = filter === 'all' ? calls : calls.filter(c => c.type === filter)
 
     const exportCSV = () => {
         const headers = 'ID,Type,Timestamp,User ID,Lat,Lng,Response Time (s)\n'
-        const rows = filtered.map(c => `${c.id},${c.type},${c.timestamp},${c.userId},${c.location.lat},${c.location.lng},${c.responseTime}`)
+        const rows = filtered.map(c => `${c.id},${c.type},${c.timestamp},${c.userId},${c.location?.lat},${c.location?.lng},${c.responseTime}`)
         const blob = new Blob([headers + rows.join('\n')], { type: 'text/csv' })
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a'); a.href = url; a.download = 'emergency_calls.csv'; a.click()
@@ -39,7 +51,7 @@ export default function EmergencyCallsPage() {
             {/* Summary cards */}
             <div className="grid grid-cols-3 lg:grid-cols-5 gap-3">
                 {Object.entries(typeIcons).map(([type, icon]) => {
-                    const count = mockEmergencyCalls.filter(c => c.type === type).length
+                    const count = calls.filter(c => c.type === type).length
                     return (
                         <button
                             key={type}
@@ -77,36 +89,43 @@ export default function EmergencyCallsPage() {
                 <div className="px-6 py-4 border-b border-gray-100">
                     <p className="text-sm font-semibold text-gray-700">{filtered.length} calls</p>
                 </div>
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                {['Type', 'Timestamp', 'User ID', 'Location', 'Response Time'].map(h => (
-                                    <th key={h} className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50">
-                            {filtered.map(c => (
-                                <tr key={c.id} className="hover:bg-gray-50 transition-colors">
-                                    <td className="px-5 py-4">
-                                        <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${typeColors[c.type]}`}>
-                                            {typeIcons[c.type]} {c.type}
-                                        </span>
-                                    </td>
-                                    <td className="px-5 py-4 text-gray-700">{new Date(c.timestamp).toLocaleString()}</td>
-                                    <td className="px-5 py-4 text-gray-500 font-mono text-xs">{c.userId}</td>
-                                    <td className="px-5 py-4 text-gray-500 text-xs">{c.location.lat.toFixed(3)}, {c.location.lng.toFixed(3)}</td>
-                                    <td className="px-5 py-4">
-                                        <span className={`font-semibold ${c.responseTime < 3 ? 'text-green-600' : 'text-orange-500'}`}>
-                                            {c.responseTime}s
-                                        </span>
-                                    </td>
+                {loading ? (
+                    <div className="flex flex-col items-center justify-center py-20">
+                        <Loader2 className="animate-spin text-purple-600 mb-2" size={32} />
+                        <p className="text-sm text-gray-500 font-medium">Loading calls...</p>
+                    </div>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    {['Type', 'Timestamp', 'User ID', 'Location', 'Response Time'].map(h => (
+                                        <th key={h} className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
+                                    ))}
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                                {filtered.map(c => (
+                                    <tr key={c.id} className="hover:bg-gray-50 transition-colors">
+                                        <td className="px-5 py-4">
+                                            <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${typeColors[c.type]}`}>
+                                                {typeIcons[c.type]} {c.type}
+                                            </span>
+                                        </td>
+                                        <td className="px-5 py-4 text-gray-700">{dateUtils.format(c.timestamp)}</td>
+                                        <td className="px-5 py-4 text-gray-500 font-mono text-xs">{c.userId}</td>
+                                        <td className="px-5 py-4 text-gray-500 text-xs">{c.location?.lat?.toFixed(3)}, {c.location?.lng?.toFixed(3)}</td>
+                                        <td className="px-5 py-4">
+                                            <span className={`font-semibold ${c.responseTime < 3 ? 'text-green-600' : 'text-orange-500'}`}>
+                                                {c.responseTime}s
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
         </div>
     )

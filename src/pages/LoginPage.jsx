@@ -12,18 +12,18 @@ export default function LoginPage() {
     const [error, setError] = useState('')
     const [loading, setLoading] = useState(false)
 
-    const handleSubmit = async (e) => {
+    const handleLogin = async (e) => {
         e.preventDefault()
         setError('')
         setLoading(true)
-        await new Promise(r => setTimeout(r, 600))
-        const result = login(email, password)
+
+        const result = await login(email, password)
         if (result.success) {
             navigate('/overview')
         } else {
             setError(result.error)
+            setLoading(false)
         }
-        setLoading(false)
     }
 
     return (
@@ -78,7 +78,7 @@ export default function LoginPage() {
                     <h2 className="text-2xl font-bold text-gray-900 mb-1">Welcome back</h2>
                     <p className="text-gray-500 text-sm mb-8">Sign in to access the admin control center</p>
 
-                    <form onSubmit={handleSubmit} className="space-y-4">
+                    <form onSubmit={handleLogin} className="space-y-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1.5">Email address</label>
                             <input

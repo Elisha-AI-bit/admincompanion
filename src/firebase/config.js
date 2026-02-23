@@ -1,21 +1,21 @@
-// Firebase configuration stub — replace with your real Firebase project credentials
-// https://console.firebase.google.com/
 import { initializeApp } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
 import { getStorage } from 'firebase/storage'
 import { getAnalytics } from 'firebase/analytics'
 
+// Your web app's Firebase configuration
 const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT.firebaseapp.com",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT.appspot.com",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId: "YOUR_APP_ID",
-    measurementId: "YOUR_MEASUREMENT_ID"
-}
+    apiKey: "AIzaSyBcAMnkvSe9wALSIUQILshWryparaK3vPo",
+    authDomain: "my-companion-58472.firebaseapp.com",
+    projectId: "my-companion-58472",
+    storageBucket: "my-companion-58472.firebasestorage.app",
+    messagingSenderId: "67590308462",
+    appId: "1:67590308462:web:5d90f639768e8df0ce1c7f",
+    measurementId: "G-E8H3Z9T7J8"
+};
 
+// Initialize Firebase
 const app = initializeApp(firebaseConfig)
 
 export const auth = getAuth(app)

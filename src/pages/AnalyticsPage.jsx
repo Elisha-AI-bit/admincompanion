@@ -1,9 +1,11 @@
+import { useState, useEffect } from 'react'
+import { firestoreService } from '../firebase/firestoreService'
 import {
     BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
     Tooltip, ResponsiveContainer, Legend
 } from 'recharts'
-import { mockCallsTrend, mockHealthTrend } from '../data/mockData'
-import { Download, TrendingUp } from 'lucide-react'
+import { Download, TrendingUp, Loader2 } from 'lucide-react'
+import { dateUtils } from '../utils/dateUtils'
 
 const kpis = [
     { label: 'Emergency Response', value: '< 3 sec', target: '< 3 sec', ok: true },
@@ -12,15 +14,46 @@ const kpis = [
     { label: 'DAU Growth (Monthly)', value: '+12.5%', target: '+10%', ok: true },
 ]
 
-const userGrowth = [
-    { month: 'Sep 25', users: 7200 }, { month: 'Oct 25', users: 8400 },
-    { month: 'Nov 25', users: 9100 }, { month: 'Dec 25', users: 9800 },
-    { month: 'Jan 26', users: 11200 }, { month: 'Feb 26', users: 12480 },
-]
-
 export default function AnalyticsPage() {
+    const [data, setData] = useState({
+        userGrowth: [],
+        healthTrend: [],
+        callsTrend: []
+    })
+    const [loading, setLoading] = useState(true)
+
+    useEffect(() => {
+        const fetchAnalyticsData = async () => {
+            try {
+                const [userGrowthData, healthTrendData, callsTrendData] = await Promise.all([
+                    firestoreService.getAll('userGrowth'),
+                    firestoreService.getAll('healthTrend'),
+                    firestoreService.getAll('callsTrend')
+                ])
+                setData({
+                    userGrowth: userGrowthData.sort((a, b) => dateUtils.compare(a.month, b.month, false)),
+                    healthTrend: healthTrendData.sort((a, b) => dateUtils.compare(a.month, b.month, false)),
+                    callsTrend: callsTrendData
+                })
+                setLoading(false)
+            } catch (error) {
+                console.error('Error fetching analytics data:', error)
+            }
+        }
+        fetchAnalyticsData()
+    }, [])
+
     const exportReport = (label) => {
-        alert(`Exporting "${label}" report… (Connect to Firebase for real data export)`)
+        alert(`Exporting "${label}" report…`)
+    }
+
+    if (loading) {
+        return (
+            <div className="flex flex-col items-center justify-center h-[calc(100vh-200px)]">
+                <Loader2 className="animate-spin text-purple-600 mb-4" size={48} />
+                <p className="text-gray-500 font-medium">Preparing detailed analytics reports...</p>
+            </div>
+        )
     }
 
     return (
@@ -52,7 +85,7 @@ export default function AnalyticsPage() {
                         <TrendingUp size={16} className="text-green-500" />
                     </div>
                     <ResponsiveContainer width="100%" height={200}>
-                        <LineChart data={userGrowth}>
+                        <LineChart data={data.userGrowth}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                             <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#9CA3AF' }} />
                             <YAxis tick={{ fontSize: 11, fill: '#9CA3AF' }} />
@@ -65,7 +98,7 @@ export default function AnalyticsPage() {
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
                     <h2 className="font-semibold text-gray-800 mb-4">Health Feature Usage</h2>
                     <ResponsiveContainer width="100%" height={200}>
-                        <BarChart data={mockHealthTrend}>
+                        <BarChart data={data.healthTrend}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                             <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#9CA3AF' }} />
                             <YAxis tick={{ fontSize: 11, fill: '#9CA3AF' }} />
@@ -83,7 +116,7 @@ export default function AnalyticsPage() {
                 <div className="lg:col-span-2 bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
                     <h2 className="font-semibold text-gray-800 mb-4">Emergency Calls by Type — 7 Days</h2>
                     <ResponsiveContainer width="100%" height={220}>
-                        <BarChart data={mockCallsTrend}>
+                        <BarChart data={data.callsTrend}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                             <XAxis dataKey="day" tick={{ fontSize: 12, fill: '#9CA3AF' }} />
                             <YAxis tick={{ fontSize: 12, fill: '#9CA3AF' }} />

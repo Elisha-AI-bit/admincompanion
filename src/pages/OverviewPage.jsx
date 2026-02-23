@@ -1,13 +1,15 @@
+import { useState, useEffect } from 'react'
+import { firestoreService } from '../firebase/firestoreService'
 import StatCard from '../components/ui/StatCard'
 import {
     Users, Phone, ShieldAlert, Globe, Heart, MapPin,
-    Activity, TrendingUp, CheckCircle
+    Activity, TrendingUp, CheckCircle, Loader2
 } from 'lucide-react'
 import {
     LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { mockCallsTrend, mockCyberRisk, mockSymptoms } from '../data/mockData'
+import { dateUtils } from '../utils/dateUtils'
 
 const CALL_COLORS = {
     Police: '#3B82F6',
@@ -18,6 +20,90 @@ const CALL_COLORS = {
 }
 
 export default function OverviewPage() {
+    const [data, setData] = useState({
+        usersCount: 0,
+        activeToday: 0,
+        emergencyCalls: 0,
+        scamReports: 0,
+        healthSearches: 0,
+        serviceRequests: 0,
+        threatsBlocked: 0,
+        callsTrend: [],
+        cyberRisk: [],
+        symptoms: []
+    })
+    const [error, setError] = useState(null)
+
+    useEffect(() => {
+        const fetchOverviewData = async () => {
+            try {
+                const results = await Promise.allSettled([
+                    firestoreService.getAll('users'),
+                    firestoreService.getAll('emergencyCalls'),
+                    firestoreService.getAll('scamReports'),
+                    firestoreService.getAll('callsTrend'),
+                    firestoreService.getAll('cyberRisk'),
+                    firestoreService.getAll('symptoms')
+                ])
+
+                const [
+                    usersRes,
+                    callsRes,
+                    reportsRes,
+                    trendRes,
+                    riskRes,
+                    symptomsRes
+                ] = results
+
+                const users = usersRes.status === 'fulfilled' ? usersRes.value : []
+                const emergencyCalls = callsRes.status === 'fulfilled' ? callsRes.value : []
+                const scamReports = reportsRes.status === 'fulfilled' ? reportsRes.value : []
+                const callsTrend = trendRes.status === 'fulfilled' ? trendRes.value : []
+                const cyberRisk = riskRes.status === 'fulfilled' ? riskRes.value : []
+                const symptoms = symptomsRes.status === 'fulfilled' ? symptomsRes.value : []
+
+                setData({
+                    usersCount: users.length,
+                    activeToday: users.filter(u => dateUtils.toISODate(u.lastActive) === new Date().toISOString().split('T')[0]).length,
+                    emergencyCalls: emergencyCalls.length,
+                    scamReports: scamReports.length,
+                    healthSearches: 0,
+                    serviceRequests: 0,
+                    threatsBlocked: 0,
+                    callsTrend,
+                    cyberRisk,
+                    symptoms
+                })
+                setLoading(false)
+            } catch (error) {
+                console.error('Error fetching overview data:', error)
+                setError('Failed to load dashboard data.')
+                setLoading(false)
+            }
+        }
+        fetchOverviewData()
+    }, [])
+
+    if (loading) {
+        return (
+            <div className="flex flex-col items-center justify-center h-[calc(100vh-200px)]">
+                <Loader2 className="animate-spin text-purple-600 mb-4" size={48} />
+                <p className="text-gray-500 font-medium">Loading real-time safety dashboard...</p>
+            </div>
+        )
+    }
+
+    if (error) {
+        return (
+            <div className="flex flex-col items-center justify-center h-[calc(100vh-200px)] bg-red-50 rounded-3xl border border-red-100 p-8">
+                <p className="text-red-600 font-bold text-lg">Dashboard Error</p>
+                <p className="text-red-500 mt-1">{error}</p>
+                <button onClick={() => window.location.reload()} className="mt-6 px-6 py-2 bg-red-600 text-white rounded-xl font-semibold shadow-lg shadow-red-200 hover:bg-red-700 transition">
+                    Retry Dashboard
+                </button>
+            </div>
+        )
+    }
     return (
         <div className="space-y-6 fade-in">
             {/* Page header */}
@@ -34,15 +120,15 @@ export default function OverviewPage() {
 
             {/* Stats row */}
             <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-                <StatCard title="Total Users" value="12,480" change={8.2} icon={Users} color="purple" sub="Registered accounts" />
-                <StatCard title="Active Today" value="3,241" change={12.5} icon={Activity} color="blue" sub="Unique sessions" />
-                <StatCard title="Emergency Calls" value="247" change={-3.1} icon={Phone} color="red" sub="Today" />
-                <StatCard title="Scam Reports" value="89" change={5.4} icon={Globe} color="orange" sub="Today" />
+                <StatCard title="Total Users" value={data.usersCount.toLocaleString()} change={8.2} icon={Users} color="purple" sub="Registered accounts" />
+                <StatCard title="Active Today" value={data.activeToday.toLocaleString()} change={12.5} icon={Activity} color="blue" sub="Unique sessions" />
+                <StatCard title="Emergency Calls" value={data.emergencyCalls.toLocaleString()} change={-3.1} icon={Phone} color="red" sub="Today" />
+                <StatCard title="Scam Reports" value={data.scamReports.toLocaleString()} change={5.4} icon={Globe} color="orange" sub="Today" />
             </div>
             <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-                <StatCard title="Health Searches" value="1,820" change={14.0} icon={Heart} color="green" sub="Today" />
-                <StatCard title="Service Requests" value="534" change={6.7} icon={MapPin} color="indigo" sub="Nearby services" />
-                <StatCard title="Threats Blocked" value="1,024" change={22.1} icon={ShieldAlert} color="purple" sub="All time" />
+                <StatCard title="Health Searches" value={data.healthSearches.toLocaleString()} change={14.0} icon={Heart} color="green" sub="Today" />
+                <StatCard title="Service Requests" value={data.serviceRequests.toLocaleString()} change={6.7} icon={MapPin} color="indigo" sub="Nearby services" />
+                <StatCard title="Threats Blocked" value={data.threatsBlocked.toLocaleString()} change={22.1} icon={ShieldAlert} color="purple" sub="All time" />
                 <StatCard title="Uptime" value="99.9%" icon={CheckCircle} color="green" sub="Last 30 days" />
             </div>
 
@@ -52,7 +138,7 @@ export default function OverviewPage() {
                 <div className="xl:col-span-2 bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
                     <h2 className="font-semibold text-gray-800 mb-4">Emergency Calls — Last 7 Days</h2>
                     <ResponsiveContainer width="100%" height={240}>
-                        <LineChart data={mockCallsTrend}>
+                        <LineChart data={data.callsTrend}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                             <XAxis dataKey="day" tick={{ fontSize: 12, fill: '#9CA3AF' }} />
                             <YAxis tick={{ fontSize: 12, fill: '#9CA3AF' }} />
@@ -70,14 +156,14 @@ export default function OverviewPage() {
                     <h2 className="font-semibold text-gray-800 mb-4">Cyber Threat Risk Distribution</h2>
                     <ResponsiveContainer width="100%" height={180}>
                         <PieChart>
-                            <Pie data={mockCyberRisk} cx="50%" cy="50%" outerRadius={70} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
-                                {mockCyberRisk.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                            <Pie data={data.cyberRisk} cx="50%" cy="50%" outerRadius={70} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
+                                {data.cyberRisk.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                             </Pie>
                             <Tooltip />
                         </PieChart>
                     </ResponsiveContainer>
                     <div className="flex justify-center gap-4 mt-2">
-                        {mockCyberRisk.map(e => (
+                        {data.cyberRisk.map(e => (
                             <div key={e.name} className="flex items-center gap-1.5 text-xs text-gray-600">
                                 <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: e.color }} />
                                 {e.name}
@@ -91,7 +177,7 @@ export default function OverviewPage() {
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
                 <h2 className="font-semibold text-gray-800 mb-4">Most Searched Health Symptoms</h2>
                 <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={mockSymptoms} layout="vertical">
+                    <BarChart data={data.symptoms} layout="vertical">
                         <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" horizontal={false} />
                         <XAxis type="number" tick={{ fontSize: 12, fill: '#9CA3AF' }} />
                         <YAxis dataKey="symptom" type="category" tick={{ fontSize: 12, fill: '#6B7280' }} width={130} />

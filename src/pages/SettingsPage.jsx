@@ -1,17 +1,36 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { Save, Bell, Shield, Key } from 'lucide-react'
+import { firestoreService } from '../firebase/firestoreService'
+import { Save, Bell, Shield, Key, Loader2 } from 'lucide-react'
 
 export default function SettingsPage() {
     const { user } = useAuth()
+    const [form, setForm] = useState({
+        name: user?.name || '',
+        email: user?.email || '',
+    })
     const [notifications, setNotifications] = useState({
         highRisk: true, emergencySurge: true, systemDowntime: true, doctorApproval: false
     })
+    const [saving, setSaving] = useState(false)
     const [saved, setSaved] = useState(false)
 
-    const save = () => {
-        setSaved(true)
-        setTimeout(() => setSaved(false), 2000)
+    const save = async () => {
+        setSaving(true)
+        try {
+            if (user?.uid) {
+                await firestoreService.update('users', user.uid, {
+                    name: form.name,
+                    notifications
+                })
+                setSaved(true)
+                setTimeout(() => setSaved(false), 2000)
+            }
+        } catch (error) {
+            console.error('Error saving settings:', error)
+        } finally {
+            setSaving(false)
+        }
     }
 
     return (
@@ -29,27 +48,33 @@ export default function SettingsPage() {
                 </div>
                 <div className="flex items-center gap-4 mb-5">
                     <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-white text-2xl font-bold">
-                        {user?.name?.charAt(0) ?? 'A'}
+                        {form.name?.charAt(0) ?? 'A'}
                     </div>
                     <div>
-                        <p className="font-semibold text-gray-900">{user?.name}</p>
-                        <p className="text-sm text-gray-500">{user?.email}</p>
+                        <p className="font-semibold text-gray-900">{form.name}</p>
+                        <p className="text-sm text-gray-500">{form.email}</p>
                         <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-lg font-medium mt-1 inline-block">
                             {user?.role?.replace('_', ' ')}
                         </span>
                     </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {[
-                        { label: 'Full Name', value: user?.name, key: 'name' },
-                        { label: 'Email', value: user?.email, key: 'email' },
-                    ].map(f => (
-                        <div key={f.key}>
-                            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{f.label}</label>
-                            <input defaultValue={f.value}
-                                className="w-full mt-1 px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
-                        </div>
-                    ))}
+                    <div>
+                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Full Name</label>
+                        <input
+                            value={form.name}
+                            onChange={(e) => setForm(p => ({ ...p, name: e.target.value }))}
+                            className="w-full mt-1 px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                        />
+                    </div>
+                    <div>
+                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Email</label>
+                        <input
+                            value={form.email}
+                            disabled
+                            className="w-full mt-1 px-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 cursor-not-allowed"
+                        />
+                    </div>
                 </div>
             </div>
 
@@ -102,20 +127,14 @@ export default function SettingsPage() {
                 </div>
             </div>
 
-            <button onClick={save}
-                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-semibold rounded-xl hover:opacity-90 transition shadow-lg shadow-purple-200">
-                <Save size={15} /> {saved ? '✓ Saved!' : 'Save Changes'}
+            <button
+                onClick={save}
+                disabled={saving}
+                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-semibold rounded-xl hover:opacity-90 disabled:opacity-50 transition shadow-lg shadow-purple-200"
+            >
+                {saving ? <Loader2 className="animate-spin" size={15} /> : <Save size={15} />}
+                {saved ? '✓ Saved Changes' : 'Save Changes'}
             </button>
-
-            {/* Firebase connect notice */}
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
-                <p className="text-sm font-semibold text-amber-800 mb-1">🔥 Connect Firebase</p>
-                <p className="text-xs text-amber-700">
-                    Replace the stub credentials in <code className="bg-amber-100 px-1 rounded">src/firebase/config.js</code> with your real Firebase project config from the{' '}
-                    <a href="https://console.firebase.google.com" target="_blank" rel="noreferrer" className="underline font-medium">Firebase Console</a>.
-                    Enable Email/Password auth and create your Firestore collections per the PRD schema.
-                </p>
-            </div>
         </div>
     )
 }

@@ -1,16 +1,39 @@
-import { useState } from 'react'
-import { mockHotlines } from '../data/mockData'
-import { ShieldAlert, Edit2, Save, X, Radio, MapPin, Video } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { firestoreService } from '../firebase/firestoreService'
+import { ShieldAlert, Edit2, Save, X, Radio, MapPin, Video, Loader2 } from 'lucide-react'
 
 export default function PhysicalSafetyPage() {
-    const [hotlines, setHotlines] = useState(mockHotlines)
+    const [hotlines, setHotlines] = useState([])
+    const [loading, setLoading] = useState(true)
     const [editingId, setEditingId] = useState(null)
     const [editVal, setEditVal] = useState('')
 
+    const [error, setError] = useState(null)
+
+    useEffect(() => {
+        const unsubscribe = firestoreService.subscribe('hotlines',
+            (data) => {
+                setHotlines(data || [])
+                setLoading(false)
+                setError(null)
+            },
+            (err) => {
+                console.error('Error subscribing to hotlines:', err)
+                setError('Failed to load hotlines.')
+                setLoading(false)
+            }
+        )
+        return () => unsubscribe()
+    }, [])
+
     const startEdit = (service, number) => { setEditingId(service); setEditVal(number) }
-    const saveEdit = (service) => {
-        setHotlines(prev => prev.map(h => h.service === service ? { ...h, number: editVal } : h))
-        setEditingId(null)
+    const saveEdit = async (id, service) => {
+        try {
+            await firestoreService.update('hotlines', id, { number: editVal })
+            setEditingId(null)
+        } catch (error) {
+            console.error('Error saving hotline:', error)
+        }
     }
 
     const stats = [
@@ -47,36 +70,51 @@ export default function PhysicalSafetyPage() {
                     <span className="text-xs text-gray-400">Super Admin only</span>
                 </div>
                 <div className="divide-y divide-gray-50">
-                    {hotlines.map(h => (
-                        <div key={h.service} className="px-6 py-4 flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <span className="text-2xl">{h.icon}</span>
-                                <p className="font-medium text-gray-800">{h.service}</p>
-                            </div>
-                            {editingId === h.service ? (
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        value={editVal}
-                                        onChange={e => setEditVal(e.target.value)}
-                                        className="border border-purple-300 rounded-lg px-3 py-1.5 text-sm w-36 focus:outline-none focus:ring-2 focus:ring-purple-300"
-                                    />
-                                    <button onClick={() => saveEdit(h.service)} className="p-1.5 bg-green-50 text-green-600 rounded-lg hover:bg-green-100">
-                                        <Save size={15} />
-                                    </button>
-                                    <button onClick={() => setEditingId(null)} className="p-1.5 bg-gray-100 text-gray-500 rounded-lg hover:bg-gray-200">
-                                        <X size={15} />
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="flex items-center gap-3">
-                                    <span className="font-mono font-semibold text-gray-700 text-sm">{h.number}</span>
-                                    <button onClick={() => startEdit(h.service, h.number)} className="p-1.5 hover:bg-purple-50 text-gray-400 hover:text-purple-600 rounded-lg transition">
-                                        <Edit2 size={15} />
-                                    </button>
-                                </div>
-                            )}
+                    {loading ? (
+                        <div className="flex flex-col items-center justify-center py-10">
+                            <Loader2 className="animate-spin text-purple-600 mb-2" size={24} />
+                            <p className="text-sm text-gray-500">Loading hotlines...</p>
                         </div>
-                    ))}
+                    ) : error ? (
+                        <div className="flex flex-col items-center justify-center py-10 bg-red-50">
+                            <p className="text-sm text-red-600">{error}</p>
+                        </div>
+                    ) : hotlines.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-10">
+                            <p className="text-sm text-gray-500 font-medium">No hotlines found.</p>
+                        </div>
+                    ) : (
+                        hotlines.map(h => (
+                            <div key={h.id} className="px-6 py-4 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <span className="text-2xl">{h.icon}</span>
+                                    <p className="font-medium text-gray-800">{h.service}</p>
+                                </div>
+                                {editingId === h.id ? (
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            value={editVal}
+                                            onChange={e => setEditVal(e.target.value)}
+                                            className="border border-purple-300 rounded-lg px-3 py-1.5 text-sm w-36 focus:outline-none focus:ring-2 focus:ring-purple-300"
+                                        />
+                                        <button onClick={() => saveEdit(h.id, h.service)} className="p-1.5 bg-green-50 text-green-600 rounded-lg hover:bg-green-100">
+                                            <Save size={15} />
+                                        </button>
+                                        <button onClick={() => setEditingId(null)} className="p-1.5 bg-gray-100 text-gray-500 rounded-lg hover:bg-gray-200">
+                                            <X size={15} />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-3">
+                                        <span className="font-mono font-semibold text-gray-700 text-sm">{h.number}</span>
+                                        <button onClick={() => startEdit(h.id, h.number)} className="p-1.5 hover:bg-purple-50 text-gray-400 hover:text-purple-600 rounded-lg transition">
+                                            <Edit2 size={15} />
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        ))
+                    )}
                 </div>
             </div>
 
