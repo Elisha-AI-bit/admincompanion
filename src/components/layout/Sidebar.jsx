@@ -16,6 +16,7 @@ const navItems = [
     { to: '/nearby-services', icon: MapPin, label: 'Nearby Services' },
     { to: '/news', icon: Newspaper, label: 'News & Content' },
     { to: '/analytics', icon: BarChart2, label: 'Reports & Analytics' },
+    { to: '/device-locator', icon: MapPin, label: 'Device Locator' },
     { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 

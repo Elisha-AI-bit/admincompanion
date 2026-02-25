@@ -11,6 +11,7 @@ import HealthPage from './pages/HealthPage'
 import NearbyServicesPage from './pages/NearbyServicesPage'
 import NewsPage from './pages/NewsPage'
 import AnalyticsPage from './pages/AnalyticsPage'
+import DeviceLocatorPage from './pages/DeviceLocatorPage'
 import SettingsPage from './pages/SettingsPage'
 import MigrationPage from './pages/MigrationPage'
 
@@ -40,6 +41,7 @@ function AppRoutes() {
         <Route path="nearby-services" element={<NearbyServicesPage />} />
         <Route path="news" element={<NewsPage />} />
         <Route path="analytics" element={<AnalyticsPage />} />
+        <Route path="device-locator" element={<DeviceLocatorPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="migrate" element={<MigrationPage />} />
       </Route>
