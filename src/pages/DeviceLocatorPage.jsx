@@ -24,6 +24,29 @@ let DefaultIcon = L.icon({
 
 L.Marker.prototype.options.icon = DefaultIcon;
 
+// Zambia default center (Lusaka) - all devices are in Zambia
+const ZAMBIA_CENTER = [-15.3875, 28.3228];
+
+// Reverse geocode lat/lng to place name (Nominatim - free, no API key)
+async function reverseGeocode(lat, lng) {
+    try {
+        const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+            { headers: { 'Accept-Language': 'en', 'User-Agent': 'MyCompanion-Admin/1.0' } }
+        );
+        const data = await res.json();
+        if (data?.address) {
+            const a = data.address;
+            return [
+                a.road, a.suburb, a.neighbourhood, a.village, a.town, a.city, a.state, a.country
+            ].filter(Boolean).join(', ') || data.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+        }
+        return data?.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    } catch {
+        return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    }
+}
+
 // Helper component to center map
 function RecenterMap({ position }) {
     const map = useMap();
@@ -41,6 +64,7 @@ export default function DeviceLocatorPage() {
     const [search, setSearch] = useState('')
     const [selectedUser, setSelectedUser] = useState(null)
     const [commandStatus, setCommandStatus] = useState({ loading: false, message: '' })
+    const [locationNames, setLocationNames] = useState({})
 
     const { user: adminUser } = useAuth()
 
@@ -85,12 +109,14 @@ export default function DeviceLocatorPage() {
                 };
 
                 const actualLocation = getCoords(latestLog);
+                const userName = u.name || u.displayName || u.email?.split('@')[0] || 'Unknown';
 
                 return {
                     ...u,
+                    name: userName,
                     location: actualLocation || {
-                        lat: -26.2041 + (Math.random() * 0.1 - 0.05),
-                        lng: 28.0473 + (Math.random() * 0.1 - 0.05)
+                        lat: ZAMBIA_CENTER[0] + (Math.random() * 0.1 - 0.05),
+                        lng: ZAMBIA_CENTER[1] + (Math.random() * 0.1 - 0.05)
                     },
                     isMock: !actualLocation,
                     battery: u.battery || latestLog?.battery || Math.floor(Math.random() * 100),
@@ -127,6 +153,25 @@ export default function DeviceLocatorPage() {
         }
     }, [])
 
+    // Fetch location names (reverse geocode) for users with coordinates
+    useEffect(() => {
+        const fetchNames = async () => {
+            const updates = {}
+            for (const u of users) {
+                if (u.addressFromLog) continue
+                const key = `${u.location.lat.toFixed(5)}_${u.location.lng.toFixed(5)}`
+                if (locationNames[u.id]?.startsWith?.('Loading')) continue
+                const name = await reverseGeocode(u.location.lat, u.location.lng)
+                updates[u.id] = name
+            }
+            if (Object.keys(updates).length) {
+                setLocationNames(prev => ({ ...prev, ...updates }))
+            }
+        }
+        fetchNames()
+    }, [users])
+
+    const getLocationName = (u) => u?.addressFromLog || locationNames[u?.id] || null
 
     const filteredUsers = users.filter(u =>
         (u.name || '').toLowerCase().includes(search.toLowerCase()) ||
@@ -191,13 +236,13 @@ export default function DeviceLocatorPage() {
     }
 
     return (
-        <div className="h-[calc(100vh-120px)] flex flex-col gap-6 fade-in">
-            <div className="flex items-center justify-between flex-shrink-0">
+        <div className="min-h-[calc(100vh-120px)] h-auto lg:h-[calc(100vh-120px)] flex flex-col gap-4 sm:gap-6 fade-in overflow-x-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 flex-shrink-0 px-1">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Device Locator</h1>
-                    <p className="text-sm text-gray-500">Real-time device tracking & anti-theft controls</p>
+                    <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Device Locator</h1>
+                    <p className="text-xs sm:text-sm text-gray-500">Real-time device tracking & anti-theft controls</p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
                     {commandStatus.message && (
                         <div className={`px-4 py-2 rounded-xl text-sm font-medium ${commandStatus.message.includes('failed') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'
                             }`}>
@@ -248,9 +293,9 @@ export default function DeviceLocatorPage() {
                                     <div className="flex-1 min-w-0">
                                         <p className="font-semibold text-gray-900 text-sm truncate">{u.name}</p>
                                         <div className="flex items-center gap-2 mt-1">
-                                            <span className={`w-2 h-2 rounded-full ${u.isMock ? 'bg-gray-400' : 'bg-green-500'}`}></span>
-                                            <p className="text-[10px] text-gray-400 uppercase font-medium">
-                                                {u.isMock ? 'Approx. Location' : 'Live GPS'}
+                                            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${u.isMock ? 'bg-gray-400' : 'bg-green-500'}`}></span>
+                                            <p className="text-[10px] text-gray-500 truncate" title={getLocationName(u) || undefined}>
+                                                {getLocationName(u) || (u.isMock ? 'Approx. Location' : 'Live GPS')}
                                             </p>
                                         </div>
                                     </div>
@@ -269,8 +314,8 @@ export default function DeviceLocatorPage() {
                 </div>
 
                 {/* Map and Controls */}
-                <div className="flex-1 flex flex-col gap-6 min-w-0">
-                    <div className="flex-1 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden relative group">
+                <div className="flex-1 flex flex-col gap-4 lg:gap-6 min-w-0 min-h-[320px] lg:min-h-0">
+                    <div className="flex-1 min-h-[320px] sm:min-h-[400px] bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden relative group">
                         <MapContainer
                             center={[-26.2041, 28.0473]}
                             zoom={14}
@@ -328,21 +373,21 @@ export default function DeviceLocatorPage() {
                         </div>
 
                         {/* Anti-Theft Controls overlay */}
-                        <div className="absolute bottom-4 left-4 right-4 z-[1000] pointer-events-none">
-                            <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-white/60 p-4 pointer-events-auto">
-                                <div className="flex items-center justify-between mb-3">
+                        <div className="absolute bottom-2 left-2 right-2 sm:bottom-4 sm:left-4 sm:right-4 z-[1000] pointer-events-none">
+                            <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-xl border border-white/60 p-3 sm:p-4 pointer-events-auto">
+                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
                                     <div className="flex items-center gap-2">
-                                        <ShieldAlert size={18} className="text-indigo-600" />
+                                        <ShieldAlert size={18} className="text-indigo-600 flex-shrink-0" />
                                         <h2 className="font-bold text-gray-900 text-sm">Anti-Theft Controls</h2>
                                     </div>
-                                    <p className="text-xs text-gray-500">
+                                    <p className="text-xs text-gray-500 truncate">
                                         {selectedUser
                                             ? <>Targeting: <span className="font-semibold text-gray-900">{selectedUser.name}</span></>
                                             : 'Select a device to target'}
                                     </p>
                                 </div>
 
-                                <div className="grid grid-cols-3 gap-3">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
                                     <button
                                         onClick={() => sendCommand('ring')}
                                         disabled={!selectedUser}
