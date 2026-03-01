@@ -39,9 +39,26 @@ function seededRandom(seed, index = 0) {
 
 // Format coordinate pair into a readable string
 function formatCoords(lat, lng) {
+    if (lat === undefined || lng === undefined) return 'Unknown'
     const latStr = `${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'}`
     const lngStr = `${Math.abs(lng).toFixed(4)}° ${lng >= 0 ? 'E' : 'W'}`
     return `${latStr}, ${lngStr}`
+}
+
+// Haversine distance in meters
+function getDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371e3; // metres
+    const φ1 = lat1 * Math.PI / 180;
+    const φ2 = lat2 * Math.PI / 180;
+    const Δφ = (lat2 - lat1) * Math.PI / 180;
+    const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+        Math.cos(φ1) * Math.cos(φ2) *
+        Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // in metres
 }
 
 // Reverse geocode lat/lng to a place name via Nominatim
@@ -100,6 +117,7 @@ export default function DeviceLocatorPage() {
     const [selectedUserId, setSelectedUserId] = useState(null)
     const [commandStatus, setCommandStatus] = useState({ loading: false, message: '' })
     const [locationNames, setLocationNames] = useState({})
+    const [geocodedCoords, setGeocodedCoords] = useState({}) // userId -> {lat, lng} last geocoded
 
     // Ref so the subscriptions closure can always read the current selectedUserId
     const selectedUserIdRef = useRef(null)
@@ -125,8 +143,6 @@ export default function DeviceLocatorPage() {
 
         const updateState = () => {
             const merged = usersData.map(u => {
-                // Find all location docs for this user, sorted by timestamp desc
-                // Match on userId (Firebase UID stored in the location collection)
                 const userLocs = locationData
                     .filter(loc => loc.userId === u.id)
                     .sort((a, b) => {
@@ -136,8 +152,6 @@ export default function DeviceLocatorPage() {
                     });
 
                 const latest = userLocs[0];
-
-                // Schema: { lat, lng, userId, timestamp, accuracy }
                 const actualLocation = (latest?.lat !== undefined && latest?.lng !== undefined)
                     ? { lat: Number(latest.lat), lng: Number(latest.lng) }
                     : null;
@@ -159,12 +173,14 @@ export default function DeviceLocatorPage() {
                 }
             })
             setUsers(merged)
-            const current = selectedUserIdRef.current
-            if (merged.length > 0 && !current) {
-                setSelectedUserId(merged[0].id)
-            } else if (merged.length > 0 && current && !merged.find(m => m.id === current)) {
-                setSelectedUserId(merged[0].id)
-            }
+
+            // Auto-select first user IF none selected OR if current selected is gone
+            setSelectedUserId(prev => {
+                if (merged.length === 0) return null;
+                if (!prev) return merged[0].id;
+                if (!merged.find(m => m.id === prev)) return merged[0].id;
+                return prev;
+            })
         }
 
         const unsubUsers = firestoreService.subscribe('users', (data) => {
@@ -173,7 +189,6 @@ export default function DeviceLocatorPage() {
             setLoading(false)
         })
 
-        // Real-time stream from the 'location' collection
         const unsubLocation = firestoreService.subscribeWithQuery(
             'location',
             [orderBy('timestamp', 'desc')],
@@ -189,40 +204,60 @@ export default function DeviceLocatorPage() {
         }
     }, [])
 
-    // Geocode in background: mark as pending immediately, then resolve to place name
+    // Optimized Geocoding Effect
     useEffect(() => {
         let cancelled = false
 
-        const usersNeedingGeocode = users.filter(u =>
-            !u.isMock &&
-            !locationNames[u.id]  // not yet fetched at all
-        )
+        // Check which users actually need geocoding
+        const usersNeedingGeocode = users.filter(u => {
+            if (u.isMock) return false;
+
+            const lastCoords = geocodedCoords[u.id];
+            const currentCoords = u.location;
+
+            // 1. Never geocoded this user at all?
+            if (!lastCoords) return true;
+
+            // 2. Moved more than 50 meters?
+            const dist = getDistance(lastCoords.lat, lastCoords.lng, currentCoords.lat, currentCoords.lng);
+            return dist > 50;
+        })
 
         if (usersNeedingGeocode.length === 0) return
 
-        // Mark all pending immediately so UI shows 'Fetching...'
+        // Mark as 'pending' ONLY if we don't already have an address
+        // This prevents the flickering "Fetching..." text
         setLocationNames(prev => {
             const updates = {}
             usersNeedingGeocode.forEach(u => {
                 if (!prev[u.id]) updates[u.id] = { type: 'pending' }
             })
+            if (Object.keys(updates).length === 0) return prev;
             return { ...prev, ...updates }
         })
 
-        // Fire all requests with a small stagger (200ms apart) to avoid hammering Nominatim
+        // Fire requests with staggering
         usersNeedingGeocode.forEach((u, i) => {
             setTimeout(async () => {
                 if (cancelled) return
+
                 const name = await reverseGeocode(u.location.lat, u.location.lng)
-                if (!cancelled) {
-                    setLocationNames(prev => ({
-                        ...prev,
-                        [u.id]: name
-                            ? { type: 'place', value: name }
-                            : { type: 'coords', value: formatCoords(u.location.lat, u.location.lng) }
-                    }))
-                }
-            }, i * 300)
+                if (cancelled) return
+
+                // Update results
+                setLocationNames(prev => ({
+                    ...prev,
+                    [u.id]: name
+                        ? { type: 'place', value: name }
+                        : { type: 'coords', value: formatCoords(u.location.lat, u.location.lng) }
+                }))
+
+                // Track these coords as "last geocoded"
+                setGeocodedCoords(prev => ({
+                    ...prev,
+                    [u.id]: { lat: u.location.lat, lng: u.location.lng }
+                }))
+            }, i * 400) // Slightly higher stagger to respect Nominatim limits
         })
 
         return () => { cancelled = true }
