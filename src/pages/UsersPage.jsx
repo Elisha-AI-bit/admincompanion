@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { firestoreService } from '../firebase/firestoreService'
-import { Search, UserCheck, UserX, Shield, MoreVertical, X, Loader2 } from 'lucide-react'
+import { Search, UserCheck, UserX, Shield, MoreVertical, X, Loader2, Trash2 } from 'lucide-react'
 import { dateUtils } from '../utils/dateUtils'
 
 const roleColors = {
@@ -24,6 +24,21 @@ export default function UsersPage() {
     const [selectedUser, setSelectedUser] = useState(null)
 
     const [error, setError] = useState(null)
+    const [deleting, setDeleting] = useState(false)
+
+    const deleteAllUsers = async () => {
+        if (!window.confirm(`Delete ALL ${users.length} users from Firestore? This cannot be undone.`)) return
+        if (!window.confirm('Are you absolutely sure? This will permanently delete every user record.')) return
+        setDeleting(true)
+        try {
+            await Promise.all(users.map(u => firestoreService.delete('users', u.id)))
+        } catch (err) {
+            console.error('Error deleting all users:', err)
+            setError('Failed to delete all users.')
+        } finally {
+            setDeleting(false)
+        }
+    }
 
     useEffect(() => {
         const unsubscribe = firestoreService.subscribe('users',
@@ -66,6 +81,16 @@ export default function UsersPage() {
         }
     }
 
+    const deleteUser = async (u) => {
+        if (!window.confirm(`Delete ${u.name || u.email}? This cannot be undone.`)) return
+        try {
+            await firestoreService.delete('users', u.id)
+        } catch (err) {
+            console.error('Error deleting user:', err)
+            setError('Failed to delete user.')
+        }
+    }
+
     return (
         <div className="space-y-6 fade-in">
             <div>
@@ -102,6 +127,16 @@ export default function UsersPage() {
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
                     <p className="text-sm font-semibold text-gray-700">{filtered.length} users</p>
+                    <button
+                        onClick={deleteAllUsers}
+                        disabled={deleting || users.length === 0}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-50 text-red-600 hover:bg-red-100 transition disabled:opacity-50 disabled:pointer-events-none"
+                    >
+                        {deleting
+                            ? <Loader2 size={13} className="animate-spin" />
+                            : <Trash2 size={13} />}
+                        {deleting ? 'Deleting…' : 'Delete All Users'}
+                    </button>
                 </div>
                 {loading ? (
                     <div className="flex flex-col items-center justify-center py-20">
@@ -163,6 +198,13 @@ export default function UsersPage() {
                                                     title="Manage"
                                                 >
                                                     <Shield size={15} />
+                                                </button>
+                                                <button
+                                                    onClick={() => deleteUser(u)}
+                                                    className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition"
+                                                    title="Delete User"
+                                                >
+                                                    <Trash2 size={15} />
                                                 </button>
                                                 <button
                                                     onClick={() => toggleStatus(u.id, u.status)}

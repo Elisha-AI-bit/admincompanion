@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { firestoreService } from '../firebase/firestoreService'
@@ -27,23 +27,44 @@ L.Marker.prototype.options.icon = DefaultIcon;
 // Zambia default center (Lusaka) - all devices are in Zambia
 const ZAMBIA_CENTER = [-15.3875, 28.3228];
 
-// Reverse geocode lat/lng to place name (Nominatim - free, no API key)
+// Deterministic pseudo-random number from a string seed (avoids random jumps on re-render)
+function seededRandom(seed, index = 0) {
+    let h = 0;
+    const str = String(seed) + String(index);
+    for (let i = 0; i < str.length; i++) {
+        h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+    }
+    return ((h >>> 0) / 0xFFFFFFFF);
+}
+
+// Format coordinate pair into a readable string
+function formatCoords(lat, lng) {
+    const latStr = `${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'}`
+    const lngStr = `${Math.abs(lng).toFixed(4)}° ${lng >= 0 ? 'E' : 'W'}`
+    return `${latStr}, ${lngStr}`
+}
+
+// Reverse geocode lat/lng to a place name via Nominatim
+// Returns a place name string, or null if it fails (caller should keep showing coords)
 async function reverseGeocode(lat, lng) {
     try {
         const res = await fetch(
             `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
             { headers: { 'Accept-Language': 'en', 'User-Agent': 'MyCompanion-Admin/1.0' } }
         );
+        if (!res.ok) return null;
         const data = await res.json();
+        if (data?.error) return null; // Nominatim returns {error: 'Unable to geocode'} for bad coords
         if (data?.address) {
             const a = data.address;
-            return [
+            const parts = [
                 a.road, a.suburb, a.neighbourhood, a.village, a.town, a.city, a.state, a.country
-            ].filter(Boolean).join(', ') || data.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+            ].filter(Boolean);
+            if (parts.length > 0) return parts.join(', ');
         }
-        return data?.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+        return data?.display_name || null;
     } catch {
-        return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+        return null;
     }
 }
 
@@ -58,76 +79,91 @@ function RecenterMap({ position }) {
     return null;
 }
 
+// Format a Firestore timestamp or ISO string into a human-readable relative time
+function formatLastSeen(ts) {
+    if (!ts) return 'Unknown';
+    let date;
+    if (ts?.seconds) date = new Date(ts.seconds * 1000);
+    else date = new Date(ts);
+    if (isNaN(date)) return 'Unknown';
+    const diff = Math.floor((Date.now() - date) / 1000);
+    if (diff < 60) return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return date.toLocaleDateString();
+}
+
 export default function DeviceLocatorPage() {
     const [users, setUsers] = useState([])
     const [loading, setLoading] = useState(true)
     const [search, setSearch] = useState('')
-    const [selectedUser, setSelectedUser] = useState(null)
+    const [selectedUserId, setSelectedUserId] = useState(null)
     const [commandStatus, setCommandStatus] = useState({ loading: false, message: '' })
     const [locationNames, setLocationNames] = useState({})
 
+    // Ref so the subscriptions closure can always read the current selectedUserId
+    const selectedUserIdRef = useRef(null)
+    useEffect(() => { selectedUserIdRef.current = selectedUserId }, [selectedUserId])
+
+    // Refs for sidebar scroll-to-selected behaviour
+    const sidebarListRef = useRef(null)
+    const selectedItemRef = useRef(null)
+    useEffect(() => {
+        if (selectedItemRef.current && sidebarListRef.current) {
+            selectedItemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+        }
+    }, [selectedUserId])
+
     const { user: adminUser } = useAuth()
+
+    // Derive the full selected user object from the ID
+    const selectedUser = useMemo(() => users.find(u => u.id === selectedUserId) || null, [users, selectedUserId])
 
     useEffect(() => {
         let usersData = []
-        let activityData = []
+        let locationData = []
 
         const updateState = () => {
             const merged = usersData.map(u => {
-                // Find all location logs for this user, sorted by timestamp desc
-                const userLogs = activityData
-                    .filter(log =>
-                        (log.userId === u.id || log.userEmail === u.email) &&
-                        (log.eventType === 'location_share' || log.type?.toUpperCase() === 'LOCATION')
-                    )
+                // Find all location docs for this user, sorted by timestamp desc
+                // Match on userId (Firebase UID stored in the location collection)
+                const userLocs = locationData
+                    .filter(loc => loc.userId === u.id)
                     .sort((a, b) => {
                         const timeA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : new Date(a.timestamp);
                         const timeB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : new Date(b.timestamp);
                         return timeB - timeA;
                     });
 
-                const latestLog = userLogs[0];
+                const latest = userLocs[0];
 
-                // Flexible coordinate parsing matching provided schema
-                const getCoords = (log) => {
-                    if (!log) return null;
+                // Schema: { lat, lng, userId, timestamp, accuracy }
+                const actualLocation = (latest?.lat !== undefined && latest?.lng !== undefined)
+                    ? { lat: Number(latest.lat), lng: Number(latest.lng) }
+                    : null;
 
-                    // Check for nested 'data.latitude/longitude' as provided in schema
-                    if (log.data && log.data.latitude !== undefined && log.data.longitude !== undefined) {
-                        return { lat: Number(log.data.latitude), lng: Number(log.data.longitude) };
-                    }
-
-                    // Fallback to top-level or other formats
-                    const l = log.location || log;
-                    const lat = l.latitude ?? l.lat;
-                    const lng = l.longitude ?? l.lng;
-
-                    if (lat !== undefined && lng !== undefined) {
-                        return { lat: Number(lat), lng: Number(lng) };
-                    }
-                    return null;
-                };
-
-                const actualLocation = getCoords(latestLog);
                 const userName = u.name || u.displayName || u.email?.split('@')[0] || 'Unknown';
 
                 return {
                     ...u,
                     name: userName,
                     location: actualLocation || {
-                        lat: ZAMBIA_CENTER[0] + (Math.random() * 0.1 - 0.05),
-                        lng: ZAMBIA_CENTER[1] + (Math.random() * 0.1 - 0.05)
+                        lat: ZAMBIA_CENTER[0] + (seededRandom(u.id, 0) * 0.1 - 0.05),
+                        lng: ZAMBIA_CENTER[1] + (seededRandom(u.id, 1) * 0.1 - 0.05)
                     },
                     isMock: !actualLocation,
-                    battery: u.battery || latestLog?.battery || Math.floor(Math.random() * 100),
-                    signal: u.signal || latestLog?.signal || ['Good', 'Fair', 'Poor'][Math.floor(Math.random() * 3)],
-                    lastSeen: latestLog?.timestamp || u.lastSeen || new Date().toISOString()
+                    accuracy: latest?.accuracy || null,
+                    battery: u.battery || Math.floor(seededRandom(u.id, 2) * 100),
+                    signal: u.signal || ['Good', 'Fair', 'Poor'][Math.floor(seededRandom(u.id, 3) * 3)],
+                    lastSeen: latest?.timestamp || u.lastSeen || null
                 }
             })
             setUsers(merged)
-            if (merged.length > 0 && !selectedUser) {
-                // Preserve selection if possible, or select first
-                setSelectedUser(prev => merged.find(m => m.id === prev?.id) || merged[0]);
+            const current = selectedUserIdRef.current
+            if (merged.length > 0 && !current) {
+                setSelectedUserId(merged[0].id)
+            } else if (merged.length > 0 && current && !merged.find(m => m.id === current)) {
+                setSelectedUserId(merged[0].id)
             }
         }
 
@@ -137,41 +173,71 @@ export default function DeviceLocatorPage() {
             setLoading(false)
         })
 
-        // Real-time location updates stream from Firestore
-        const unsubActivity = firestoreService.subscribeWithQuery(
-            'activity_logs',
+        // Real-time stream from the 'location' collection
+        const unsubLocation = firestoreService.subscribeWithQuery(
+            'location',
             [orderBy('timestamp', 'desc')],
             (data) => {
-                activityData = data
+                locationData = data
                 updateState()
             }
         )
 
         return () => {
             unsubUsers()
-            unsubActivity()
+            unsubLocation()
         }
     }, [])
 
-    // Fetch location names (reverse geocode) for users with coordinates
+    // Geocode in background: mark as pending immediately, then resolve to place name
     useEffect(() => {
-        const fetchNames = async () => {
+        let cancelled = false
+
+        const usersNeedingGeocode = users.filter(u =>
+            !u.isMock &&
+            !locationNames[u.id]  // not yet fetched at all
+        )
+
+        if (usersNeedingGeocode.length === 0) return
+
+        // Mark all pending immediately so UI shows 'Fetching...'
+        setLocationNames(prev => {
             const updates = {}
-            for (const u of users) {
-                if (u.addressFromLog) continue
-                const key = `${u.location.lat.toFixed(5)}_${u.location.lng.toFixed(5)}`
-                if (locationNames[u.id]?.startsWith?.('Loading')) continue
+            usersNeedingGeocode.forEach(u => {
+                if (!prev[u.id]) updates[u.id] = { type: 'pending' }
+            })
+            return { ...prev, ...updates }
+        })
+
+        // Fire all requests with a small stagger (200ms apart) to avoid hammering Nominatim
+        usersNeedingGeocode.forEach((u, i) => {
+            setTimeout(async () => {
+                if (cancelled) return
                 const name = await reverseGeocode(u.location.lat, u.location.lng)
-                updates[u.id] = name
-            }
-            if (Object.keys(updates).length) {
-                setLocationNames(prev => ({ ...prev, ...updates }))
-            }
-        }
-        fetchNames()
+                if (!cancelled) {
+                    setLocationNames(prev => ({
+                        ...prev,
+                        [u.id]: name
+                            ? { type: 'place', value: name }
+                            : { type: 'coords', value: formatCoords(u.location.lat, u.location.lng) }
+                    }))
+                }
+            }, i * 300)
+        })
+
+        return () => { cancelled = true }
     }, [users])
 
-    const getLocationName = (u) => u?.addressFromLog || locationNames[u?.id] || null
+    // Returns the location label to display in the sidebar/popup
+    const getLocationName = (u) => {
+        if (!u) return null
+        const cached = locationNames[u.id]
+        if (!cached) return null                              // real GPS but not yet started
+        if (cached.type === 'pending') return 'Fetching location…'
+        if (cached.type === 'place') return cached.value     // e.g. 'Lusaka, Zambia'
+        if (cached.type === 'coords') return cached.value    // formatted coords as last resort
+        return null
+    }
 
     const filteredUsers = users.filter(u =>
         (u.name || '').toLowerCase().includes(search.toLowerCase()) ||
@@ -270,7 +336,7 @@ export default function DeviceLocatorPage() {
                         </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto">
+                    <div className="flex-1 overflow-y-auto" ref={sidebarListRef}>
                         {loading ? (
                             <div className="flex flex-col items-center justify-center py-10">
                                 <Loader2 className="animate-spin text-indigo-600 mb-2" size={24} />
@@ -282,11 +348,12 @@ export default function DeviceLocatorPage() {
                             filteredUsers.map(u => (
                                 <button
                                     key={u.id}
-                                    onClick={() => setSelectedUser(u)}
-                                    className={`w-full p-4 border-b border-gray-50 text-left transition-colors flex items-center gap-3 ${selectedUser?.id === u.id ? 'bg-indigo-50/50' : 'hover:bg-gray-50'
+                                    ref={selectedUserId === u.id ? selectedItemRef : null}
+                                    onClick={() => setSelectedUserId(u.id)}
+                                    className={`w-full p-4 border-b border-gray-50 text-left transition-colors flex items-center gap-3 ${selectedUserId === u.id ? 'bg-indigo-50/50' : 'hover:bg-gray-50'
                                         }`}
                                 >
-                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-xs font-bold ${selectedUser?.id === u.id ? 'bg-indigo-600' : 'bg-gray-300'
+                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-xs font-bold ${selectedUserId === u.id ? 'bg-indigo-600' : 'bg-gray-300'
                                         }`}>
                                         {u.name?.charAt(0) || '?'}
                                     </div>
@@ -327,11 +394,26 @@ export default function DeviceLocatorPage() {
                                 attribution="Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community"
                             />
                             {users.map(u => (
-                                <Marker key={u.id} position={[u.location.lat, u.location.lng]}>
+                                <Marker
+                                    key={u.id}
+                                    position={[u.location.lat, u.location.lng]}
+                                    eventHandlers={{ click: () => setSelectedUserId(u.id) }}
+                                >
                                     <Popup>
-                                        <div className="p-1">
-                                            <p className="font-bold text-gray-900">{u.name}</p>
-                                            <p className="text-xs text-gray-500 mt-1">Last seen: {new Date(u.lastSeen).toLocaleTimeString()}</p>
+                                        <div className="p-2 min-w-[200px]">
+                                            <p className="font-bold text-gray-900 text-sm">{u.name}</p>
+                                            <p className="text-xs text-gray-500 mt-0.5">{u.email}</p>
+                                            {getLocationName(u) && (
+                                                <p className="text-xs text-gray-600 mt-2 flex items-start gap-1">
+                                                    <MapPin size={12} className="flex-shrink-0 mt-0.5" />
+                                                    <span>{getLocationName(u)}</span>
+                                                </p>
+                                            )}
+                                            <div className="flex gap-3 mt-2 text-[11px] text-gray-500">
+                                                <span>Battery: {u.battery}%</span>
+                                                <span>Signal: {u.signal}</span>
+                                            </div>
+                                            <p className="text-[10px] text-gray-400 mt-1">Last seen: {formatLastSeen(u.lastSeen)}</p>
                                         </div>
                                     </Popup>
                                 </Marker>
@@ -356,11 +438,13 @@ export default function DeviceLocatorPage() {
                                 <div className="grid grid-cols-2 gap-2">
                                     <div className="bg-gray-50 p-2 rounded-xl">
                                         <p className="text-[9px] text-gray-400 font-bold uppercase">Accuracy</p>
-                                        <p className="text-xs font-bold text-indigo-600">± 5 meters</p>
+                                        <p className="text-xs font-bold text-indigo-600">
+                                            {selectedUser.accuracy ? `± ${selectedUser.accuracy}m` : '± --'}
+                                        </p>
                                     </div>
                                     <div className="bg-gray-50 p-2 rounded-xl">
-                                        <p className="text-[9px] text-gray-400 font-bold uppercase">Last Sync</p>
-                                        <p className="text-xs font-bold text-gray-700">2m ago</p>
+                                        <p className="text-[9px] text-gray-400 font-bold uppercase">Last Seen</p>
+                                        <p className="text-xs font-bold text-gray-700">{formatLastSeen(selectedUser.lastSeen)}</p>
                                     </div>
                                 </div>
                             </div>
