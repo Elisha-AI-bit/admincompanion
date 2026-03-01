@@ -79,7 +79,7 @@ export const firestoreService = {
         }
     },
 
-    // Real-time listener
+    // Real-time listener (entire collection)
     subscribe: (collectionName, callback, onError) => {
         const q = query(collection(db, collectionName));
         return onSnapshot(q, (snapshot) => {
@@ -92,6 +92,23 @@ export const firestoreService = {
             }
         }, (error) => {
             console.error(`Error subscribing to ${collectionName}:`, error);
+            if (onError) onError(error);
+        });
+    },
+
+    // Real-time listener with query constraints (ordering, filters, limits)
+    subscribeWithQuery: (collectionName, constraints = [], callback, onError) => {
+        const q = query(collection(db, collectionName), ...constraints);
+        return onSnapshot(q, (snapshot) => {
+            try {
+                const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                callback(data);
+            } catch (error) {
+                console.error(`Error processing snapshot for ${collectionName} with constraints:`, error);
+                if (onError) onError(error);
+            }
+        }, (error) => {
+            console.error(`Error subscribing (with constraints) to ${collectionName}:`, error);
             if (onError) onError(error);
         });
     },

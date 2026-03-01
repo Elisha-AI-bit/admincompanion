@@ -15,27 +15,39 @@ export function AuthProvider({ children }) {
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-            if (firebaseUser) {
-                // Fetch user role from Firestore
-                const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid))
-                if (userDoc.exists()) {
-                    setUser({
-                        uid: firebaseUser.uid,
-                        email: firebaseUser.email,
-                        ...userDoc.data()
-                    })
+            try {
+                if (firebaseUser) {
+                    const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid))
+                    if (userDoc.exists()) {
+                        setUser({
+                            uid: firebaseUser.uid,
+                            email: firebaseUser.email,
+                            ...userDoc.data()
+                        })
+                    } else {
+                        setUser({
+                            uid: firebaseUser.uid,
+                            email: firebaseUser.email,
+                            role: 'user'
+                        })
+                    }
                 } else {
-                    // Default role for authenticated users without a doc
+                    setUser(null)
+                }
+            } catch (err) {
+                console.error('Error fetching user profile:', err)
+                if (firebaseUser) {
                     setUser({
                         uid: firebaseUser.uid,
                         email: firebaseUser.email,
                         role: 'user'
                     })
+                } else {
+                    setUser(null)
                 }
-            } else {
-                setUser(null)
+            } finally {
+                setLoading(false)
             }
-            setLoading(false)
         })
 
         return () => unsubscribe()
@@ -43,6 +55,9 @@ export function AuthProvider({ children }) {
 
     const login = async (email, password) => {
         try {
+            // Prevent ProtectedRoute from redirecting back to /login
+            // while Firebase is still establishing the new session.
+            setLoading(true)
             await signInWithEmailAndPassword(auth, email, password)
             return { success: true }
         } catch (error) {
@@ -51,6 +66,8 @@ export function AuthProvider({ children }) {
             if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
                 message = 'Invalid email or password.'
             }
+            // If login fails, stop the loading state so the form is usable again.
+            setLoading(false)
             return { success: false, error: message }
         }
     }

@@ -1,29 +1,41 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Shield, Eye, EyeOff, CircleAlert } from 'lucide-react'
 
 export default function LoginPage() {
-    const { login } = useAuth()
+    const { login, user, loading } = useAuth()
     const navigate = useNavigate()
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [showPwd, setShowPwd] = useState(false)
     const [error, setError] = useState('')
-    const [loading, setLoading] = useState(false)
+    const [formLoading, setFormLoading] = useState(false)
+
+    useEffect(() => {
+        if (!loading && user) navigate('/overview', { replace: true })
+    }, [user, loading, navigate])
 
     const handleLogin = async (e) => {
         e.preventDefault()
         setError('')
-        setLoading(true)
+        setFormLoading(true)
 
         const result = await login(email, password)
         if (result.success) {
             navigate('/overview')
         } else {
             setError(result.error)
-            setLoading(false)
+            setFormLoading(false)
         }
+    }
+
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-[#F8F9FE]">
+                <div className="text-purple-600 font-medium">Loading…</div>
+            </div>
+        )
     }
 
     return (

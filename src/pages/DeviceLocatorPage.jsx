@@ -2,11 +2,14 @@ import { useState, useEffect } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { firestoreService } from '../firebase/firestoreService'
+import { functionsService } from '../firebase/functionsService'
 import {
-    Search, MapPin, Battery, Signal, Clock,
-    Bell, Lock, ShieldAlert, Loader2, User,
+    Search, MapPin, Battery, Signal,
+    Bell, Lock, ShieldAlert, Loader2,
     Maximize2, RefreshCw
 } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
+import { orderBy } from 'firebase/firestore'
 
 // Fix for Leaflet default icon issue in React
 import icon from 'leaflet/dist/images/marker-icon.png'
@@ -26,7 +29,7 @@ function RecenterMap({ position }) {
     const map = useMap();
     useEffect(() => {
         if (position) {
-            map.setView(position, 15);
+            map.flyTo(position, 15, { duration: 0.75 });
         }
     }, [position, map]);
     return null;
@@ -38,6 +41,8 @@ export default function DeviceLocatorPage() {
     const [search, setSearch] = useState('')
     const [selectedUser, setSelectedUser] = useState(null)
     const [commandStatus, setCommandStatus] = useState({ loading: false, message: '' })
+
+    const { user: adminUser } = useAuth()
 
     useEffect(() => {
         let usersData = []
@@ -106,16 +111,22 @@ export default function DeviceLocatorPage() {
             setLoading(false)
         })
 
-        const unsubActivity = firestoreService.subscribe('activity_logs', (data) => {
-            activityData = data
-            updateState()
-        })
+        // Real-time location updates stream from Firestore
+        const unsubActivity = firestoreService.subscribeWithQuery(
+            'activity_logs',
+            [orderBy('timestamp', 'desc')],
+            (data) => {
+                activityData = data
+                updateState()
+            }
+        )
 
         return () => {
             unsubUsers()
             unsubActivity()
         }
     }, [])
+
 
     const filteredUsers = users.filter(u =>
         (u.name || '').toLowerCase().includes(search.toLowerCase()) ||
@@ -136,13 +147,40 @@ export default function DeviceLocatorPage() {
         setCommandStatus({ loading: true, message: `Sending ${type} command...` })
 
         try {
-            // Log the command to Firestore
-            await firestoreService.add('device_commands', {
+            const basePayload = {
                 userId: selectedUser.id,
+                userEmail: selectedUser.email,
                 command: type,
+                actionType: type,
                 timestamp: new Date().toISOString(),
-                status: 'pending'
+                status: 'pending',
+                requestedBy: adminUser?.uid || null,
+                requestedByEmail: adminUser?.email || null
+            }
+
+            // Primary Firestore command document (used by mobile app / backend)
+            const commandId = await firestoreService.add('device_commands', basePayload)
+
+            // Audit log entry for this outbound command
+            await firestoreService.add('device_command_audit', {
+                ...basePayload,
+                commandId,
+                eventType: 'COMMAND_SENT',
+                direction: 'OUTBOUND'
             })
+
+            // Trigger Cloud Function to send FCM message (if deployed)
+            try {
+                await functionsService.sendDeviceCommand({
+                    commandId,
+                    userId: selectedUser.id,
+                    userEmail: selectedUser.email,
+                    actionType: type
+                })
+            } catch (fnError) {
+                console.error('Cloud Function sendDeviceCommand failed:', fnError)
+                // Non-fatal for UI; logs still captured in Firestore
+            }
 
             setCommandStatus({ loading: false, message: `Command ${type} sent successfully!` })
             setTimeout(() => setCommandStatus({ loading: false, message: '' }), 3000)
@@ -235,13 +273,13 @@ export default function DeviceLocatorPage() {
                     <div className="flex-1 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden relative group">
                         <MapContainer
                             center={[-26.2041, 28.0473]}
-                            zoom={13}
+                            zoom={14}
                             style={{ height: '100%', width: '100%' }}
                             zoomControl={false}
                         >
                             <TileLayer
-                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                                attribution="Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community"
                             />
                             {users.map(u => (
                                 <Marker key={u.id} position={[u.location.lat, u.location.lng]}>
@@ -288,62 +326,66 @@ export default function DeviceLocatorPage() {
                                 <Maximize2 size={18} />
                             </button>
                         </div>
-                    </div>
 
-                    {/* Controls Panel */}
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-                        <div className="flex items-center justify-between mb-6">
-                            <div className="flex items-center gap-2">
-                                <ShieldAlert size={18} className="text-indigo-600" />
-                                <h2 className="font-bold text-gray-900">Anti-Theft Controls</h2>
+                        {/* Anti-Theft Controls overlay */}
+                        <div className="absolute bottom-4 left-4 right-4 z-[1000] pointer-events-none">
+                            <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-white/60 p-4 pointer-events-auto">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center gap-2">
+                                        <ShieldAlert size={18} className="text-indigo-600" />
+                                        <h2 className="font-bold text-gray-900 text-sm">Anti-Theft Controls</h2>
+                                    </div>
+                                    <p className="text-xs text-gray-500">
+                                        {selectedUser
+                                            ? <>Targeting: <span className="font-semibold text-gray-900">{selectedUser.name}</span></>
+                                            : 'Select a device to target'}
+                                    </p>
+                                </div>
+
+                                <div className="grid grid-cols-3 gap-3">
+                                    <button
+                                        onClick={() => sendCommand('ring')}
+                                        disabled={!selectedUser}
+                                        className="flex flex-col items-center gap-2 p-3 rounded-2xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50/50 transition-all group disabled:opacity-50 disabled:pointer-events-none"
+                                    >
+                                        <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                                            <Bell size={18} />
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-[11px] font-bold text-gray-900">Ring Device</p>
+                                            <p className="text-[9px] text-gray-500 mt-0.5">High-volume alarm</p>
+                                        </div>
+                                    </button>
+
+                                    <button
+                                        onClick={() => sendCommand('lock')}
+                                        disabled={!selectedUser}
+                                        className="flex flex-col items-center gap-2 p-3 rounded-2xl border border-gray-100 hover:border-orange-200 hover:bg-orange-50/50 transition-all group disabled:opacity-50 disabled:pointer-events-none"
+                                    >
+                                        <div className="w-10 h-10 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center group-hover:bg-orange-600 group-hover:text-white transition-colors">
+                                            <Lock size={18} />
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-[11px] font-bold text-gray-900">Lock Device</p>
+                                            <p className="text-[9px] text-gray-500 mt-0.5">Block access</p>
+                                        </div>
+                                    </button>
+
+                                    <button
+                                        onClick={() => sendCommand('wipe')}
+                                        disabled={!selectedUser}
+                                        className="flex flex-col items-center gap-2 p-3 rounded-2xl border border-gray-100 hover:border-red-200 hover:bg-red-50/50 transition-all group disabled:opacity-50 disabled:pointer-events-none"
+                                    >
+                                        <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center group-hover:bg-red-600 group-hover:text-white transition-colors">
+                                            <ShieldAlert size={18} />
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-[11px] font-bold text-gray-900">Wipe Data</p>
+                                            <p className="text-[9px] text-red-500 mt-0.5 font-medium">Permanent removal</p>
+                                        </div>
+                                    </button>
+                                </div>
                             </div>
-                            {selectedUser && (
-                                <p className="text-xs text-gray-500">Targeting: <span className="font-semibold text-gray-900">{selectedUser.name}</span></p>
-                            )}
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-4">
-                            <button
-                                onClick={() => sendCommand('ring')}
-                                disabled={!selectedUser}
-                                className="flex flex-col items-center gap-3 p-4 rounded-2xl border border-gray-100 hover:border-indigo-200 hover:bg-indigo-50/50 transition-all group disabled:opacity-50 disabled:pointer-events-none"
-                            >
-                                <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                                    <Bell size={20} />
-                                </div>
-                                <div className="text-center">
-                                    <p className="text-sm font-bold text-gray-900">Ring Device</p>
-                                    <p className="text-[10px] text-gray-500 mt-0.5">Triggers high-volume alarm</p>
-                                </div>
-                            </button>
-
-                            <button
-                                onClick={() => sendCommand('lock')}
-                                disabled={!selectedUser}
-                                className="flex flex-col items-center gap-3 p-4 rounded-2xl border border-gray-100 hover:border-orange-200 hover:bg-orange-50/50 transition-all group disabled:opacity-50 disabled:pointer-events-none"
-                            >
-                                <div className="w-12 h-12 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center group-hover:bg-orange-600 group-hover:text-white transition-colors">
-                                    <Lock size={20} />
-                                </div>
-                                <div className="text-center">
-                                    <p className="text-sm font-bold text-gray-900">Lock Device</p>
-                                    <p className="text-[10px] text-gray-500 mt-0.5">Prevents unauthorized access</p>
-                                </div>
-                            </button>
-
-                            <button
-                                onClick={() => sendCommand('wipe')}
-                                disabled={!selectedUser}
-                                className="flex flex-col items-center gap-3 p-4 rounded-2xl border border-gray-100 hover:border-red-200 hover:bg-red-50/50 transition-all group disabled:opacity-50 disabled:pointer-events-none"
-                            >
-                                <div className="w-12 h-12 rounded-xl bg-red-50 text-red-600 flex items-center justify-center group-hover:bg-red-600 group-hover:text-white transition-colors">
-                                    <ShieldAlert size={20} />
-                                </div>
-                                <div className="text-center">
-                                    <p className="text-sm font-bold text-gray-900">Wipe Data</p>
-                                    <p className="text-[10px] text-gray-500 mt-0.5 text-red-500 font-medium">Permanent data removal</p>
-                                </div>
-                            </button>
                         </div>
                     </div>
                 </div>
