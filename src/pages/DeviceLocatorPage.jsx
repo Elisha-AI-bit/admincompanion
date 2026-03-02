@@ -6,10 +6,10 @@ import { functionsService } from '../firebase/functionsService'
 import {
     Search, MapPin, Battery, Signal,
     Bell, Lock, ShieldAlert, Loader2,
-    Maximize2, RefreshCw
+    Maximize2, RefreshCw, Camera, X, ExternalLink
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-import { orderBy } from 'firebase/firestore'
+import { orderBy, where } from 'firebase/firestore'
 
 // Fix for Leaflet default icon issue in React
 import icon from 'leaflet/dist/images/marker-icon.png'
@@ -40,8 +40,8 @@ function seededRandom(seed, index = 0) {
 // Format coordinate pair into a readable string
 function formatCoords(lat, lng) {
     if (lat === undefined || lng === undefined) return 'Unknown'
-    const latStr = `${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'}`
-    const lngStr = `${Math.abs(lng).toFixed(4)}° ${lng >= 0 ? 'E' : 'W'}`
+    const latStr = `${Math.abs(lat).toFixed(6)}° ${lat >= 0 ? 'N' : 'S'}`
+    const lngStr = `${Math.abs(lng).toFixed(6)}° ${lng >= 0 ? 'E' : 'W'}`
     return `${latStr}, ${lngStr}`
 }
 
@@ -90,7 +90,7 @@ function RecenterMap({ position }) {
     const map = useMap();
     useEffect(() => {
         if (position) {
-            map.flyTo(position, 15, { duration: 0.75 });
+            map.flyTo(position, 18, { duration: 1.5 });
         }
     }, [position, map]);
     return null;
@@ -118,6 +118,8 @@ export default function DeviceLocatorPage() {
     const [commandStatus, setCommandStatus] = useState({ loading: false, message: '' })
     const [locationNames, setLocationNames] = useState({})
     const [geocodedCoords, setGeocodedCoords] = useState({}) // userId -> {lat, lng} last geocoded
+    const [antiTheftReports, setAntiTheftReports] = useState([])
+    const [selectedReport, setSelectedReport] = useState(null)
 
     // Ref so the subscriptions closure can always read the current selectedUserId
     const selectedUserIdRef = useRef(null)
@@ -198,9 +200,28 @@ export default function DeviceLocatorPage() {
             }
         )
 
+        const unsubAntiTheft = firestoreService.subscribeWithQuery(
+            'anti_theft_reports',
+            [orderBy('timestamp', 'desc')],
+            (data) => {
+                setAntiTheftReports(data)
+                // If a new report comes in for the currently selected user, show it!
+                if (data.length > 0) {
+                    const latest = data[0]
+                    const reportTime = latest.timestamp?.seconds ? latest.timestamp.seconds * 1000 : new Date(latest.timestamp).getTime()
+                    const now = Date.now()
+                    // If the report is very fresh (last 30 seconds), auto-open it
+                    if (now - reportTime < 30000 && latest.userId === selectedUserIdRef.current) {
+                        setSelectedReport(latest)
+                    }
+                }
+            }
+        )
+
         return () => {
             unsubUsers()
             unsubLocation()
+            unsubAntiTheft()
         }
     }, [])
 
@@ -285,7 +306,8 @@ export default function DeviceLocatorPage() {
         const confirmMsg = {
             ring: "This will trigger a loud alarm on the user's device. Continue?",
             lock: "This will remotely lock the user's device. Continue?",
-            wipe: "CRITICAL: This will factory reset the user's device and delete all data. ARE YOU ABSOLUTELY SURE?"
+            wipe: "CRITICAL: This will factory reset the user's device and delete all data. ARE YOU ABSOLUTELY SURE?",
+            anti_theft: "This will trigger the Anti-Theft mode: The device will capture a photo and its current location and send it back to this dashboard. Continue?"
         }
 
         if (!window.confirm(confirmMsg[type])) return;
@@ -419,14 +441,20 @@ export default function DeviceLocatorPage() {
                 <div className="flex-1 flex flex-col gap-4 lg:gap-6 min-w-0 min-h-[320px] lg:min-h-0">
                     <div className="flex-1 min-h-[320px] sm:min-h-[400px] bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden relative group">
                         <MapContainer
-                            center={[-26.2041, 28.0473]}
-                            zoom={14}
+                            center={ZAMBIA_CENTER}
+                            zoom={15}
                             style={{ height: '100%', width: '100%' }}
                             zoomControl={false}
                         >
                             <TileLayer
                                 url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
                                 attribution="Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community"
+                            />
+                            <TileLayer
+                                url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+                                attribution="Labels &copy; Esri"
+                                pane="shadowPane"
+                                zIndex={1001}
                             />
                             {users.map(u => (
                                 <Marker
@@ -548,12 +576,127 @@ export default function DeviceLocatorPage() {
                                             <p className="text-[9px] text-red-500 mt-0.5 font-medium">Permanent removal</p>
                                         </div>
                                     </button>
+
+                                    <button
+                                        onClick={() => sendCommand('anti_theft')}
+                                        disabled={!selectedUser}
+                                        className="flex flex-col items-center gap-2 p-3 rounded-2xl border border-gray-100 hover:border-indigo-200 hover:bg-indigo-50/50 transition-all group disabled:opacity-50 disabled:pointer-events-none"
+                                    >
+                                        <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                                            <Camera size={18} />
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-[11px] font-bold text-gray-900">Anti-Theft</p>
+                                            <p className="text-[9px] text-indigo-500 mt-0.5 font-medium">Capture Photo & Loc</p>
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Recent Anti-Theft Reports for selected user */}
+                        {selectedUser && antiTheftReports.filter(r => r.userId === selectedUser.id).length > 0 && (
+                            <div className="absolute top-4 right-16 z-[1000] flex flex-col gap-2">
+                                <button
+                                    onClick={() => setSelectedReport(antiTheftReports.find(r => r.userId === selectedUser.id))}
+                                    className="px-3 py-2 bg-white/90 backdrop-blur-md rounded-xl shadow-lg border border-indigo-100 flex items-center gap-2 text-indigo-600 hover:bg-indigo-50 transition pointer-events-auto"
+                                >
+                                    <Camera size={14} />
+                                    <span className="text-xs font-bold">Latest Report</span>
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Anti-Theft Report Modal */}
+            {selectedReport && (
+                <div className="fixed inset-0 z-[5000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+                        <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-indigo-50/30">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white">
+                                    <ShieldAlert size={20} />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-gray-900">Anti-Theft Report</h3>
+                                    <p className="text-[10px] text-gray-500 font-medium uppercase">{formatLastSeen(selectedReport.timestamp)}</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setSelectedReport(null)}
+                                className="p-2 hover:bg-white rounded-full transition-colors text-gray-400 hover:text-gray-600"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <div className="p-6">
+                            <div className="aspect-[4/3] w-full bg-gray-100 rounded-2xl overflow-hidden mb-4 relative flex items-center justify-center group">
+                                {selectedReport.imageUrl ? (
+                                    <img
+                                        src={selectedReport.imageUrl}
+                                        alt="Captured anti-theft"
+                                        className="w-full h-full object-cover"
+                                    />
+                                ) : (
+                                    <div className="flex flex-col items-center gap-2 text-gray-400">
+                                        <Camera size={48} strokeWidth={1} />
+                                        <p className="text-sm">No image captured</p>
+                                    </div>
+                                )}
+                                {selectedReport.imageUrl && (
+                                    <a
+                                        href={selectedReport.imageUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="absolute bottom-4 right-4 p-2 bg-white/90 backdrop-blur-md rounded-lg shadow-lg text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    >
+                                        <ExternalLink size={16} />
+                                    </a>
+                                )}
+                            </div>
+
+                            <div className="space-y-4">
+                                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                                    <div className="flex items-center gap-2 mb-2 text-indigo-600">
+                                        <MapPin size={16} />
+                                        <span className="text-xs font-bold uppercase tracking-wider">Reported Location</span>
+                                    </div>
+                                    <p className="text-sm font-semibold text-gray-800">
+                                        {formatCoords(selectedReport.lat, selectedReport.lng)}
+                                    </p>
+                                    {selectedReport.accuracy && (
+                                        <p className="text-[10px] text-gray-500 mt-1">Accuracy: ±{selectedReport.accuracy}m</p>
+                                    )}
+                                </div>
+
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={() => {
+                                            const u = users.find(u => u.id === selectedReport.userId);
+                                            if (u) {
+                                                setSelectedUserId(u.id);
+                                                setSelectedReport(null);
+                                            }
+                                        }}
+                                        className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition"
+                                    >
+                                        View on Map
+                                    </button>
+                                    <button
+                                        onClick={() => setSelectedReport(null)}
+                                        className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl text-sm font-bold hover:bg-gray-200 transition"
+                                    >
+                                        Dismiss
+                                    </button>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            )}
         </div>
     )
 }
