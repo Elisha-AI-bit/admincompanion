@@ -54,7 +54,7 @@ const normalizeService = (s) => {
     const lower = s.toLowerCase()
     if (lower === 'fire' || lower.includes('fire')) return 'Fire Brigade'
     if (lower === 'gbv' || lower.includes('gbv') || lower.includes('gender')) return 'GBV'
-    if (lower.includes('ambulance') || lower.includes('medical')) return 'Ambulance'
+    if (lower.includes('cyber') || lower.includes('response') || lower.includes('ambulance') || lower.includes('medical')) return 'Cyber Response'
     if (lower.includes('child') || lower.includes('support')) return 'Child Support'
     if (lower.includes('police')) return 'Police'
     return s
@@ -64,7 +64,7 @@ const normalizeService = (s) => {
  * Groups ALL emergency_calls docs by month — shows complete history.
  */
 function buildCallsByMonth(callDocs) {
-    const SERVICES = ['Police', 'Fire Brigade', 'GBV', 'Child Support', 'Ambulance']
+    const SERVICES = ['Police', 'Fire Brigade', 'GBV', 'Child Support', 'Cyber Response']
     const map = {}
     callDocs.forEach(doc => {
         const ts = doc.timestamp?.seconds
@@ -73,7 +73,7 @@ function buildCallsByMonth(callDocs) {
         if (isNaN(ts.getTime())) return
         const key = ts.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
         const service = normalizeService(doc.service || doc.type)
-        if (!map[key]) map[key] = { month: key, Police: 0, 'Fire Brigade': 0, GBV: 0, 'Child Support': 0, Ambulance: 0 }
+        if (!map[key]) map[key] = { month: key, Police: 0, 'Fire Brigade': 0, GBV: 0, 'Child Support': 0, 'Cyber Response': 0 }
         if (SERVICES.includes(service)) map[key][service]++
     })
     return Object.values(map).sort((a, b) => new Date(a.month) - new Date(b.month))
@@ -218,7 +218,7 @@ export default function AnalyticsPage() {
                                 <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 8px 24px rgba(0,0,0,0.1)' }} />
                                 <Legend />
                                 <Bar dataKey="Police" fill="#3B82F6" stackId="a" />
-                                <Bar dataKey="Ambulance" fill="#EF4444" stackId="a" />
+                                <Bar dataKey="Cyber Response" fill="#EF4444" stackId="a" />
                                 <Bar dataKey="Fire Brigade" fill="#F97316" stackId="a" />
                                 <Bar dataKey="GBV" fill="#A855F7" stackId="a" />
                                 <Bar dataKey="Child Support" fill="#14B8A6" stackId="a" radius={[6, 6, 0, 0]} />

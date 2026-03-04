@@ -17,7 +17,7 @@ import { dateUtils } from '../utils/dateUtils'
 
 const CALL_COLORS = {
     Police: '#3B82F6',
-    Ambulance: '#EF4444',
+    'Cyber Response': '#EF4444',
     'Fire Brigade': '#F97316',
     GBV: '#A855F7',
     'Child Support': '#14B8A6',
@@ -30,7 +30,7 @@ const normalizeService = (s) => {
     const lower = s.toLowerCase()
     if (lower === 'fire' || lower.includes('fire')) return 'Fire Brigade'
     if (lower === 'gbv' || lower.includes('gbv') || lower.includes('gender')) return 'GBV'
-    if (lower.includes('ambulance') || lower.includes('medical')) return 'Ambulance'
+    if (lower.includes('cyber') || lower.includes('response') || lower.includes('ambulance') || lower.includes('medical')) return 'Cyber Response'
     if (lower.includes('child') || lower.includes('support')) return 'Child Support'
     if (lower.includes('police')) return 'Police'
     return s
@@ -45,11 +45,12 @@ const ACTION_ICON_MAP = {
     recording_started: { icon: '🎙️', label: 'Recording Started', color: 'bg-indigo-50 text-indigo-600' },
     recording_stopped: { icon: '⏹️', label: 'Recording Stopped', color: 'bg-gray-50 text-gray-600' },
     sos: { icon: '🚨', label: 'SOS Alert', color: 'bg-red-50 text-red-600' },
+    capture_triggered: { icon: '📷', label: 'The Capture', color: 'bg-rose-50 text-rose-600' },
 }
 
 /** Builds 7-day grouped call trend from raw emergency_calls docs */
 function buildCallsTrend(docs, days = 7) {
-    const SERVICES = ['Police', 'Fire Brigade', 'GBV', 'Child Support', 'Ambulance']
+    const SERVICES = ['Police', 'Fire Brigade', 'GBV', 'Child Support', 'Cyber Response']
     const dayMap = {}
     const dayLabels = []
     for (let i = days - 1; i >= 0; i--) {
@@ -57,7 +58,7 @@ function buildCallsTrend(docs, days = 7) {
         d.setDate(d.getDate() - i)
         const label = d.toLocaleDateString('en-US', { weekday: 'short' })
         const key = d.toISOString().split('T')[0]
-        dayMap[key] = { day: label, Police: 0, 'Fire Brigade': 0, GBV: 0, 'Child Support': 0, Ambulance: 0 }
+        dayMap[key] = { day: label, Police: 0, 'Fire Brigade': 0, GBV: 0, 'Child Support': 0, 'Cyber Response': 0 }
         dayLabels.push(key)
     }
     docs.forEach(doc => {

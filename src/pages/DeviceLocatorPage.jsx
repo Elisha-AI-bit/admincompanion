@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { firestoreService } from '../firebase/firestoreService'
 import { functionsService } from '../firebase/functionsService'
+import { serverService } from '../firebase/serverService'
 import {
     Search, MapPin, Battery, Signal,
     Bell, Lock, ShieldAlert, Loader2,
@@ -337,16 +338,22 @@ export default function DeviceLocatorPage() {
                 direction: 'OUTBOUND'
             })
 
-            // Trigger Cloud Function to send FCM message (if deployed)
+            // Trigger Cloud Function or Custom Backend to send FCM message
             try {
-                await functionsService.sendDeviceCommand({
-                    commandId,
-                    userId: selectedUser.id,
-                    userEmail: selectedUser.email,
-                    actionType: type
-                })
+                if (type === 'anti_theft') {
+                    // Use the new Node.js + Express backend for Anti-Theft
+                    await serverService.triggerAntiTheft(selectedUser.id);
+                } else {
+                    // Fallback to existing Cloud Function for other commands
+                    await functionsService.sendDeviceCommand({
+                        commandId,
+                        userId: selectedUser.id,
+                        userEmail: selectedUser.email,
+                        actionType: type
+                    });
+                }
             } catch (fnError) {
-                console.error('Cloud Function sendDeviceCommand failed:', fnError)
+                console.error(`FCM trigger failed for ${type}:`, fnError)
                 // Non-fatal for UI; logs still captured in Firestore
             }
 
@@ -359,7 +366,7 @@ export default function DeviceLocatorPage() {
     }
 
     return (
-        <div className="min-h-[calc(100vh-120px)] h-auto lg:h-[calc(100vh-120px)] flex flex-col gap-4 sm:gap-6 fade-in overflow-x-hidden">
+        <div className="h-[calc(100vh-120px)] flex flex-col gap-4 sm:gap-6 fade-in overflow-hidden">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 flex-shrink-0 px-1">
                 <div>
                     <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Device Locator</h1>
@@ -377,6 +384,48 @@ export default function DeviceLocatorPage() {
                     </button>
                 </div>
             </div>
+
+            {/* COMPACT TOP CONTROLS */}
+            {selectedUser && (
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-2.5 flex items-center justify-between gap-4 flex-shrink-0 animate-in slide-in-from-top duration-300 mx-1">
+                    <div className="flex items-center gap-3 truncate">
+                        <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                            <ShieldAlert size={16} />
+                        </div>
+                        <div>
+                            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider leading-none mb-0.5">Active Device Control</p>
+                            <p className="text-sm font-bold text-gray-900 truncate">{selectedUser.name}</p>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                        <button
+                            onClick={() => sendCommand('ring')}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-blue-100 bg-blue-50/50 text-blue-600 text-[11px] font-bold hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+                        >
+                            <Bell size={13} /> Ring
+                        </button>
+                        <button
+                            onClick={() => sendCommand('lock')}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-orange-100 bg-orange-50/50 text-orange-600 text-[11px] font-bold hover:bg-orange-600 hover:text-white transition-all shadow-sm"
+                        >
+                            <Lock size={13} /> Lock
+                        </button>
+                        <button
+                            onClick={() => sendCommand('wipe')}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-red-100 bg-red-50/50 text-red-600 text-[11px] font-bold hover:bg-red-600 hover:text-white transition-all shadow-sm"
+                        >
+                            <ShieldAlert size={13} /> Wipe
+                        </button>
+                        <button
+                            onClick={() => sendCommand('anti_theft')}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-100 bg-indigo-50/50 text-indigo-600 text-[11px] font-bold hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
+                        >
+                            <Camera size={13} /> Anti-Theft
+                        </button>
+                    </div>
+                </div>
+            )}
 
             <div className="flex-1 flex gap-6 min-h-0">
                 {/* Users List Sidebar */}
@@ -442,19 +491,15 @@ export default function DeviceLocatorPage() {
                     <div className="flex-1 min-h-[320px] sm:min-h-[400px] bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden relative group">
                         <MapContainer
                             center={ZAMBIA_CENTER}
-                            zoom={15}
+                            zoom={16}
+                            maxZoom={19}
                             style={{ height: '100%', width: '100%' }}
                             zoomControl={false}
                         >
                             <TileLayer
-                                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                                attribution="Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community"
-                            />
-                            <TileLayer
-                                url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
-                                attribution="Labels &copy; Esri"
-                                pane="shadowPane"
-                                zIndex={1001}
+                                url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
+                                attribution="&copy; Google Maps"
+                                maxZoom={19}
                             />
                             {users.map(u => (
                                 <Marker
@@ -517,81 +562,6 @@ export default function DeviceLocatorPage() {
                             <button className="w-10 h-10 bg-white rounded-xl shadow-lg border border-gray-100 flex items-center justify-center text-gray-600 hover:text-indigo-600 transition pointer-events-auto">
                                 <Maximize2 size={18} />
                             </button>
-                        </div>
-
-                        {/* Anti-Theft Controls overlay */}
-                        <div className="absolute bottom-2 left-2 right-2 sm:bottom-4 sm:left-4 sm:right-4 z-[1000] pointer-events-none">
-                            <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-xl border border-white/60 p-3 sm:p-4 pointer-events-auto">
-                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
-                                    <div className="flex items-center gap-2">
-                                        <ShieldAlert size={18} className="text-indigo-600 flex-shrink-0" />
-                                        <h2 className="font-bold text-gray-900 text-sm">Anti-Theft Controls</h2>
-                                    </div>
-                                    <p className="text-xs text-gray-500 truncate">
-                                        {selectedUser
-                                            ? <>Targeting: <span className="font-semibold text-gray-900">{selectedUser.name}</span></>
-                                            : 'Select a device to target'}
-                                    </p>
-                                </div>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
-                                    <button
-                                        onClick={() => sendCommand('ring')}
-                                        disabled={!selectedUser}
-                                        className="flex flex-col items-center gap-2 p-3 rounded-2xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50/50 transition-all group disabled:opacity-50 disabled:pointer-events-none"
-                                    >
-                                        <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                                            <Bell size={18} />
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-[11px] font-bold text-gray-900">Ring Device</p>
-                                            <p className="text-[9px] text-gray-500 mt-0.5">High-volume alarm</p>
-                                        </div>
-                                    </button>
-
-                                    <button
-                                        onClick={() => sendCommand('lock')}
-                                        disabled={!selectedUser}
-                                        className="flex flex-col items-center gap-2 p-3 rounded-2xl border border-gray-100 hover:border-orange-200 hover:bg-orange-50/50 transition-all group disabled:opacity-50 disabled:pointer-events-none"
-                                    >
-                                        <div className="w-10 h-10 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center group-hover:bg-orange-600 group-hover:text-white transition-colors">
-                                            <Lock size={18} />
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-[11px] font-bold text-gray-900">Lock Device</p>
-                                            <p className="text-[9px] text-gray-500 mt-0.5">Block access</p>
-                                        </div>
-                                    </button>
-
-                                    <button
-                                        onClick={() => sendCommand('wipe')}
-                                        disabled={!selectedUser}
-                                        className="flex flex-col items-center gap-2 p-3 rounded-2xl border border-gray-100 hover:border-red-200 hover:bg-red-50/50 transition-all group disabled:opacity-50 disabled:pointer-events-none"
-                                    >
-                                        <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center group-hover:bg-red-600 group-hover:text-white transition-colors">
-                                            <ShieldAlert size={18} />
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-[11px] font-bold text-gray-900">Wipe Data</p>
-                                            <p className="text-[9px] text-red-500 mt-0.5 font-medium">Permanent removal</p>
-                                        </div>
-                                    </button>
-
-                                    <button
-                                        onClick={() => sendCommand('anti_theft')}
-                                        disabled={!selectedUser}
-                                        className="flex flex-col items-center gap-2 p-3 rounded-2xl border border-gray-100 hover:border-indigo-200 hover:bg-indigo-50/50 transition-all group disabled:opacity-50 disabled:pointer-events-none"
-                                    >
-                                        <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                                            <Camera size={18} />
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-[11px] font-bold text-gray-900">Anti-Theft</p>
-                                            <p className="text-[9px] text-indigo-500 mt-0.5 font-medium">Capture Photo & Loc</p>
-                                        </div>
-                                    </button>
-                                </div>
-                            </div>
                         </div>
 
                         {/* Recent Anti-Theft Reports for selected user */}

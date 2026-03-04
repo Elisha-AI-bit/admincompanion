@@ -7,13 +7,13 @@ import { dateUtils } from '../utils/dateUtils'
 
 const typeColors = {
     Police: 'bg-blue-100 text-blue-700',
-    Ambulance: 'bg-red-100 text-red-700',
+    'Cyber Response': 'bg-red-100 text-red-700',
     'Fire Brigade': 'bg-orange-100 text-orange-700',
     GBV: 'bg-purple-100 text-purple-700',
     'Child Support': 'bg-teal-100 text-teal-700',
 }
 
-const typeIcons = { Police: '🚔', Ambulance: '🚑', 'Fire Brigade': '🚒', GBV: '💜', 'Child Support': '👶' }
+const typeIcons = { Police: '🚔', 'Cyber Response': '🛡️', 'Fire Brigade': '🚒', GBV: '💜', 'Child Support': '👶' }
 
 // Normalize service names — Flutter may write 'GBV Support', 'Fire Brigade', etc.
 const normalizeService = (s) => {
@@ -21,7 +21,7 @@ const normalizeService = (s) => {
     const lower = s.toLowerCase()
     if (lower === 'fire' || lower.includes('fire')) return 'Fire Brigade'
     if (lower === 'gbv' || lower.includes('gbv') || lower.includes('gender')) return 'GBV'
-    if (lower.includes('ambulance') || lower.includes('medical')) return 'Ambulance'
+    if (lower.includes('cyber') || lower.includes('response') || lower.includes('ambulance') || lower.includes('medical')) return 'Cyber Response'
     if (lower.includes('child') || lower.includes('support')) return 'Child Support'
     if (lower.includes('police')) return 'Police'
     return s
@@ -116,7 +116,7 @@ export default function EmergencyCallsPage() {
             <div className="flex items-center gap-2 flex-wrap">
                 <Filter size={15} className="text-gray-400" />
                 <span className="text-sm text-gray-500">Filter:</span>
-                {['all', 'Police', 'Ambulance', 'Fire Brigade', 'GBV', 'Child Support'].map(t => (
+                {['all', 'Police', 'Cyber Response', 'Fire Brigade', 'GBV', 'Child Support'].map(t => (
                     <button
                         key={t}
                         onClick={() => setFilter(t)}

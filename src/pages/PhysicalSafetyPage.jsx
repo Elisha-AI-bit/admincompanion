@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { firestoreService } from '../firebase/firestoreService'
 import { db } from '../firebase/config'
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore'
-import { ShieldAlert, Edit2, Save, X, Radio, MapPin, Video, Loader2, Phone } from 'lucide-react'
+import { ShieldAlert, Edit2, Save, X, Radio, MapPin, Video, Loader2, Phone, Camera, Play, ExternalLink } from 'lucide-react'
 import { dateUtils } from '../utils/dateUtils'
 
 function todayStart() {
@@ -18,6 +18,7 @@ export default function PhysicalSafetyPage() {
     const [editVal, setEditVal] = useState('')
     const [error, setError] = useState(null)
     const [recentLogs, setRecentLogs] = useState([])
+    const [mediaEvidence, setMediaEvidence] = useState([])
     const [usersMap, setUsersMap] = useState({})   // userId → name
     const [stats, setStats] = useState({
         recordings: 0,
@@ -47,7 +48,7 @@ export default function PhysicalSafetyPage() {
 
             const recordings = logs.filter(l => l.actionType === 'recording_started').length
             const locationShares = logs.filter(l => l.actionType === 'location_share').length
-            const sosAlerts = logs.filter(l => l.actionType === 'sos').length
+            const sosAlerts = logs.filter(l => l.actionType === 'sos' || l.actionType === 'capture_triggered').length
             const emergencyCallsToday = logs.filter(l => {
                 if (!l.actionType?.startsWith('emergency_call_')) return false
                 const ts = l.timestamp?.seconds
@@ -60,12 +61,21 @@ export default function PhysicalSafetyPage() {
 
             // Recent logs: SOS, emergency calls, recordings, location shares
             const relevant = logs.filter(l =>
-                ['sos', 'recording_started', 'location_share'].includes(l.actionType) ||
+                ['sos', 'recording_started', 'location_share', 'capture_triggered'].includes(l.actionType) ||
                 l.actionType?.startsWith('emergency_call_')
             ).slice(0, 20)
             setRecentLogs(relevant)
         }, (err) => console.error('Action log error:', err))
 
+        return () => unsub()
+    }, [])
+
+    // Media Evidence listener
+    useEffect(() => {
+        const q = query(collection(db, 'media_evidence'), orderBy('timestamp', 'desc'))
+        const unsub = onSnapshot(q, (snap) => {
+            setMediaEvidence(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+        }, (err) => console.error('Media evidence error:', err))
         return () => unsub()
     }, [])
 
@@ -99,13 +109,14 @@ export default function PhysicalSafetyPage() {
     const statCards = [
         { label: 'Active Recordings', value: stats.recordings, icon: Video, color: 'from-purple-500 to-indigo-600' },
         { label: 'Location Shares', value: stats.locationShares, icon: MapPin, color: 'from-blue-500 to-cyan-500' },
-        { label: 'SOS Activations', value: stats.sosAlerts, icon: Radio, color: 'from-red-500 to-orange-500' },
+        { label: 'The Capture', value: stats.sosAlerts, icon: Radio, color: 'from-red-500 to-orange-500' },
         { label: 'Emergency Calls Today', value: stats.emergencyCallsToday, icon: ShieldAlert, color: 'from-pink-500 to-rose-500' },
     ]
 
     const actionLabel = (type) => {
         const map = {
-            sos: 'SOS Alert',
+            sos: 'The Capture',
+            capture_triggered: 'The Capture',
             recording_started: 'Recording Started',
             location_share: 'Location Shared',
             emergency_call_police: 'Police Call',
@@ -117,7 +128,7 @@ export default function PhysicalSafetyPage() {
     }
     const actionIcon = (type) => {
         const map = {
-            sos: '🚨', recording_started: '🎙️', location_share: '📍',
+            sos: '🚨', capture_triggered: '📷', recording_started: '🎙️', location_share: '📍',
             emergency_call_police: '🚔', emergency_call_gbv: '💜',
             emergency_call_fire: '🚒', emergency_call_child_support: '👶',
         }
@@ -223,11 +234,85 @@ export default function PhysicalSafetyPage() {
                                         <p className="text-xs text-gray-500">
                                             {dateUtils.format(log.timestamp)}
                                         </p>
+                                        {log.actionType === 'location_share' && (
+                                            <div className="mt-1 flex items-center gap-2">
+                                                <span className="text-[10px] text-gray-400 font-mono bg-gray-100 px-1.5 py-0.5 rounded">
+                                                    {log.details?.latitude?.toFixed(5)}, {log.details?.longitude?.toFixed(5)}
+                                                </span>
+                                                <a
+                                                    href={`https://www.google.com/maps?q=${log.details?.latitude},${log.details?.longitude}`}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="text-[10px] text-blue-600 hover:underline flex items-center gap-0.5"
+                                                >
+                                                    View on Map <ExternalLink size={10} />
+                                                </a>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 <span className="text-xs px-2.5 py-1 rounded-lg font-medium bg-purple-100 text-purple-700">
                                     {actionLabel(log.actionType)}
                                 </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Media Evidence Viewer */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="font-semibold text-gray-800">Media Evidence</h2>
+                    <span className="text-xs text-gray-400">{mediaEvidence.length} items logged</span>
+                </div>
+
+                {mediaEvidence.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 border-2 border-dashed border-gray-100 rounded-xl">
+                        <Camera size={40} className="text-gray-200 mb-2" />
+                        <p className="text-sm text-gray-400">No media evidence uploaded yet</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {mediaEvidence.map((item) => (
+                            <div key={item.id} className="group relative bg-gray-50 rounded-2xl overflow-hidden border border-gray-100 hover:border-purple-200 transition-all">
+                                {item.type === 'photo' ? (
+                                    <div className="aspect-video bg-gray-200 relative overflow-hidden">
+                                        <img src={item.url} alt="Evidence" className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                                        <div className="absolute top-2 left-2 px-2 py-1 bg-black/50 backdrop-blur-md rounded text-[10px] text-white font-bold uppercase tracking-wider">
+                                            Capture
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="aspect-video bg-indigo-50 flex flex-col items-center justify-center p-4">
+                                        <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 mb-2">
+                                            <Play size={20} />
+                                        </div>
+                                        <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Audio Recording</p>
+                                    </div>
+                                )}
+
+                                <div className="p-4">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <p className="text-sm font-bold text-gray-800 truncate">
+                                            {usersMap[item.userId] || 'Anonymous'}
+                                        </p>
+                                        <a
+                                            href={item.url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="p-1.5 rounded-lg bg-white text-gray-400 hover:text-purple-600 shadow-sm border border-gray-100 transition-colors"
+                                        >
+                                            <ExternalLink size={14} />
+                                        </a>
+                                    </div>
+                                    <div className="flex items-center justify-between text-[11px] text-gray-400">
+                                        <span>{dateUtils.format(item.timestamp)}</span>
+                                        {item.metadata?.duration && (
+                                            <span className="font-mono">{item.metadata.duration}</span>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
                         ))}
                     </div>
